@@ -1,42 +1,32 @@
-//! Low-level cast map generic over the backing `slotmap` map; its typed
-//! accessors are `unsafe` (the caller upholds the metadata contract spelled out
-//! below).
+//! [`UnsafeCastMapG`] is the low-level cast map. It rebuilds typed references
+//! from the metadata that a key caches, so its typed `get`, `get_mut` and
+//! `remove` are `unsafe`, and the caller must make sure that the metadata fits
+//! the value under the key. [`CastMapG`](crate::cast_map::CastMapG) checks that
+//! instead.
 //!
-//! [`UnsafeCastMapG`] is the single source of truth for the cast logic — the
-//! pointer-metadata reconstruction behind the typed `get` / `get_mut` /
-//! `remove` family. Its one type parameter is the backing map `M`
-//! ([`SlotMapTrait`](crate::slotmap_trait::SlotMapTrait)); the backing key and stored
-//! pointer types are read off `M` as `M::Key` and `M::Value`. The same code
-//! serves both [`slotmap::SlotMap`] and [`slotmap::DenseSlotMap`], exposed as the
-//! [`UnsafeCastMap`] and [`UnsafeDenseCastMap`] type aliases.
-//!
-//! Typed lookups go through [`CastKey`], but `get`, `get_mut`, and `remove`
-//! are **`unsafe`**: the caller must ensure the key's pointer
-//! metadata is valid for the data stored at that slot. For a safe wrapper that
-//! validates each lookup against the slot's stored concrete type id (see
-//! [`ConcreteTypeId`](crate::type_tagged_ptr::ConcreteTypeId)), see
-//! [`CastMapG`](crate::cast_map::CastMapG) (and its aliases).
-//!
-//! ## Relationship to `slotmap`
-//! Every method forwards to the backing `slotmap` map through the
-//! [`SlotMapTrait`](crate::slotmap_trait::SlotMapTrait) trait.
+//! The map is generic over its backing map `M`, and every method forwards to
+//! `M` through [`Map`] or a capability trait from [`map`](crate::map).
 
-use std::collections::TryReserveError;
-use std::ops::{Deref, DerefMut};
+#[cfg(feature = "coerce_unsized")]
+use std::ops::Deref;
+use std::ops::DerefMut;
 use std::ptr::Pointee;
 
-use slotmap::{DenseSlotMap, Key, SlotMap};
+#[cfg(feature = "gen_map")]
+use gen_map::{DefaultMapConfig, GenMap};
+#[cfg(feature = "slotmap")]
+use slotmap::{DenseSlotMap, SlotMap};
 
 use crate::cast_key::CastKey;
+use crate::map::{Capacity, Detach, GetDisjointMut, InsertWithKey, MTarget, Map, Reserve};
 use crate::retype_ptr::RetypePtr;
-use crate::slotmap_trait::{MTarget, SlotMapTrait};
 use stable_deref_trait::StableDeref;
 
 // ─── Conversion helper ───────────────────────────────────────────────────────
 
-/// Build a cast key from a `slotmap` key and a reference (for pointer metadata).
+/// Builds a cast key from a backing key and the metadata of `reference`.
 #[inline]
-fn to_castable<K: Key, O: ?Sized + Pointee>(key: K, reference: &O) -> CastKey<O, K>
+fn to_castable<K: Copy, O: ?Sized + Pointee>(key: K, reference: &O) -> CastKey<O, K>
 where
     <O as Pointee>::Metadata: Copy,
 {
@@ -46,14 +36,9 @@ where
 
 // ─── UnsafeCastMapG ────────────────────────────────────────────────────────────
 
-/// A `slotmap` wrapper, generic over the backing map `M`, that supports
-/// typed lookups via [`CastKey`].
-///
-/// The backing key type is `M::Key` and the stored smart pointer is `M::Value`
-/// (which must implement [`StableDeref`] so pointer-metadata casts are sound);
-/// the map's "output" type is `<M::Value as Deref>::Target`. `M` is the backing
-/// `slotmap` map ([`slotmap::SlotMap`] or [`slotmap::DenseSlotMap`]); see the
-/// [`UnsafeCastMap`] / [`UnsafeDenseCastMap`] aliases.
+/// A cast map over the backing map `M`, with typed lookups through
+/// [`CastKey`]. Its values must implement [`StableDeref`] for the metadata
+/// casts to be sound.
 pub struct UnsafeCastMapG<M> {
     pub(crate) inner: M,
 }
@@ -62,13 +47,10 @@ pub struct UnsafeCastMapG<M> {
 
 impl<M> Clone for UnsafeCastMapG<M>
 where
-    M: SlotMapTrait + Clone,
+    M: Map + Clone,
 {
-    /// Cloning preserves every slot's key and version, so keys valid on the
-    /// original stay valid on the clone. (The checked
-    /// [`CastMapG`](crate::cast_map::CastMapG) layer behaves the same way:
-    /// its lookups are validated by slot version and stored type id, so
-    /// cloning it carries no extra caveats.)
+    /// Clones the map. Keys of the original work on the clone when the backing
+    /// map keeps its keys in its clones, as the `slotmap` maps and `GenMap` do.
     #[inline]
     fn clone(&self) -> Self {
         Self {
@@ -84,7 +66,7 @@ where
 
 impl<M> Default for UnsafeCastMapG<M>
 where
-    M: SlotMapTrait,
+    M: Map,
     M::Value: StableDeref,
 {
     #[inline]
@@ -97,7 +79,7 @@ where
 
 impl<M> UnsafeCastMapG<M>
 where
-    M: SlotMapTrait,
+    M: Map,
     M::Value: StableDeref,
 {
     /// Creates a new, empty map.
@@ -108,7 +90,7 @@ where
 
     // ── inner accessors ───────────────────────────────────────────────────
 
-    /// Consumes this map and returns the backing `slotmap` map.
+    /// Consumes this map and returns the backing map.
     ///
     /// # Safety
     /// Keys handed out by this map cache pointer metadata for the values as
@@ -121,7 +103,7 @@ where
         self.inner
     }
 
-    /// Returns a shared reference to the backing `slotmap` map.
+    /// Returns a shared reference to the backing map.
     ///
     /// # Safety
     /// See [`inner`](Self::inner).
@@ -130,7 +112,7 @@ where
         &self.inner
     }
 
-    /// Returns a mutable reference to the backing `slotmap` map.
+    /// Returns a mutable reference to the backing map.
     ///
     /// # Safety
     /// See [`inner`](Self::inner).
@@ -141,7 +123,10 @@ where
 
     /// Creates a new map with the given pre-allocated capacity.
     #[inline]
-    pub fn with_capacity(capacity: usize) -> Self {
+    pub fn with_capacity(capacity: usize) -> Self
+    where
+        M: Reserve,
+    {
         Self {
             inner: M::with_capacity(capacity),
         }
@@ -161,24 +146,32 @@ where
 
     /// Returns how many slots the backing storage can hold before reallocating.
     #[inline]
-    pub fn capacity(&self) -> usize {
+    pub fn capacity(&self) -> usize
+    where
+        M: Capacity,
+    {
         self.inner.capacity()
     }
 
     /// Reserves capacity for at least `additional` more elements.
     #[inline]
-    pub fn reserve(&mut self, additional: usize) {
+    pub fn reserve(&mut self, additional: usize)
+    where
+        M: Reserve,
+    {
         self.inner.reserve(additional);
     }
 
     /// Tries to reserve capacity for at least `additional` more elements.
     #[inline]
-    pub fn try_reserve(&mut self, additional: usize) -> Result<(), TryReserveError> {
+    pub fn try_reserve(&mut self, additional: usize) -> Result<(), M::ReserveError>
+    where
+        M: Reserve,
+    {
         self.inner.try_reserve(additional)
     }
 
-    /// Removes all elements from the map. Outstanding keys are invalidated
-    /// (`slotmap` bumps slot versions on clear).
+    /// Removes every value from the map.
     #[inline]
     pub fn clear(&mut self) {
         self.inner.clear();
@@ -196,13 +189,13 @@ where
 
     // ── backing-key access ───────────────────────────────────────────────
 
-    /// Shared-reference lookup using the backing `slotmap` key directly.
+    /// Returns a shared reference to the value under a backing key.
     #[inline]
     pub fn get_by_inner_key(&self, key: M::Key) -> Option<&MTarget<M>> {
         self.inner.get(key).map(|p| &**p)
     }
 
-    /// Removes an element by its backing `slotmap` key, returning the pointer.
+    /// Removes the value under a backing key and returns its pointer.
     #[inline]
     pub fn remove_by_inner_key(&mut self, key: M::Key) -> Option<M::Value> {
         self.inner.remove(key)
@@ -219,10 +212,10 @@ where
 
 impl<M> UnsafeCastMapG<M>
 where
-    M: SlotMapTrait,
+    M: Map,
     M::Value: StableDeref + DerefMut,
 {
-    /// Mutable-reference lookup using the backing `slotmap` key directly.
+    /// Returns a mutable reference to the value under a backing key.
     #[inline]
     pub fn get_by_inner_key_mut(&mut self, key: M::Key) -> Option<&mut MTarget<M>> {
         self.inner.get_mut(key).map(|p| &mut **p)
@@ -234,14 +227,17 @@ where
         self.inner.values_mut().map(|p| &mut **p)
     }
 
-    /// Mutable disjoint lookup by backing `slotmap` keys, yielding output-typed
-    /// references. Returns `None` if any key is invalid or two keys alias the
-    /// same slot.
+    /// Returns a mutable reference to the value under each backing key, or
+    /// `None` if a key has no value or two of the keys refer to the same
+    /// value.
     #[inline]
     pub fn get_disjoint_mut_by_inner_key<const N: usize>(
         &mut self,
         keys: [M::Key; N],
-    ) -> Option<[&mut MTarget<M>; N]> {
+    ) -> Option<[&mut MTarget<M>; N]>
+    where
+        M: GetDisjointMut,
+    {
         let stored = self.inner.get_disjoint_mut(keys)?;
         Some(stored.map(|p| &mut **p))
     }
@@ -255,7 +251,10 @@ where
     pub unsafe fn get_disjoint_unchecked_mut_by_inner_key<const N: usize>(
         &mut self,
         keys: [M::Key; N],
-    ) -> [&mut MTarget<M>; N] {
+    ) -> [&mut MTarget<M>; N]
+    where
+        M: GetDisjointMut,
+    {
         let stored = self.inner.get_disjoint_unchecked_mut(keys);
         stored.map(|p| &mut **p)
     }
@@ -265,7 +264,7 @@ where
 
 impl<M> UnsafeCastMapG<M>
 where
-    M: SlotMapTrait,
+    M: Map,
     M::Value: StableDeref,
     MTarget<M>: Pointee,
     <MTarget<M> as Pointee>::Metadata: Copy,
@@ -276,7 +275,12 @@ where
     /// (`CastKey<MTarget<M>, M::Key>`, metadata read from the stored value).
     #[inline]
     pub fn insert(&mut self, value: M::Value) -> CastKey<MTarget<M>, M::Key> {
-        self.insert_with_key(|_| value)
+        let inner_key = self.inner.insert(value);
+        let reference = self
+            .inner
+            .get(inner_key)
+            .expect("just-inserted key is live");
+        to_castable::<M::Key, MTarget<M>>(inner_key, &**reference)
     }
 
     /// Inserts a smart pointer produced by `func`, which receives the backing
@@ -285,7 +289,10 @@ where
     pub fn insert_with_key(
         &mut self,
         func: impl FnOnce(M::Key) -> M::Value,
-    ) -> CastKey<MTarget<M>, M::Key> {
+    ) -> CastKey<MTarget<M>, M::Key>
+    where
+        M: InsertWithKey,
+    {
         self.try_insert_with_key(|key| Ok::<_, ()>(func(key)))
             .unwrap()
     }
@@ -296,7 +303,10 @@ where
     pub fn try_insert_with_key<E>(
         &mut self,
         func: impl FnOnce(M::Key) -> Result<M::Value, E>,
-    ) -> Result<CastKey<MTarget<M>, M::Key>, E> {
+    ) -> Result<CastKey<MTarget<M>, M::Key>, E>
+    where
+        M: InsertWithKey,
+    {
         let inner_key = self.inner.try_insert_with_key(func)?;
         let reference = self
             .inner
@@ -310,6 +320,9 @@ where
     /// Inserts a concrete-typed smart pointer (coerced into `M::Value` on the
     /// way in), returning a [`CastKey`] whose metadata is for
     /// `ConcretePtr::Target` (not the map's output type).
+    ///
+    /// This method needs the `coerce_unsized` feature.
+    #[cfg(feature = "coerce_unsized")]
     #[inline]
     pub fn insert_sized<ConcretePtr>(
         &mut self,
@@ -319,17 +332,22 @@ where
         ConcretePtr: std::ops::CoerceUnsized<M::Value> + Deref,
         ConcretePtr::Target: Sized,
     {
-        self.insert_sized_with_key(|_| value)
+        let value: M::Value = value;
+        CastKey::from_raw_parts(self.inner.insert(value), ())
     }
 
     /// Inserts a concrete smart pointer produced by `func`, which receives the
     /// fully-typed [`CastKey`] the value will live under.
+    ///
+    /// This method needs the `coerce_unsized` feature.
+    #[cfg(feature = "coerce_unsized")]
     #[inline]
     pub fn insert_sized_with_key<ConcretePtr>(
         &mut self,
         func: impl FnOnce(CastKey<ConcretePtr::Target, M::Key>) -> ConcretePtr,
     ) -> CastKey<ConcretePtr::Target, M::Key>
     where
+        M: InsertWithKey,
         ConcretePtr: std::ops::CoerceUnsized<M::Value> + Deref,
         ConcretePtr::Target: Sized,
     {
@@ -339,12 +357,16 @@ where
 
     /// Like [`insert_sized_with_key`](Self::insert_sized_with_key) but the
     /// closure may return `Err`, in which case nothing is inserted.
+    ///
+    /// This method needs the `coerce_unsized` feature.
+    #[cfg(feature = "coerce_unsized")]
     #[inline]
     pub fn try_insert_sized_with_key<ConcretePtr, E>(
         &mut self,
         func: impl FnOnce(CastKey<ConcretePtr::Target, M::Key>) -> Result<ConcretePtr, E>,
     ) -> Result<CastKey<ConcretePtr::Target, M::Key>, E>
     where
+        M: InsertWithKey,
         ConcretePtr: std::ops::CoerceUnsized<M::Value> + Deref,
         ConcretePtr::Target: Sized,
     {
@@ -366,17 +388,21 @@ where
     /// Inserts a smart pointer whose (possibly unsized) target differs from
     /// the map's output type, returning a key typed with the *source* type
     /// (e.g. insert a `TypeTaggedBox<dyn Foo>` into a `dyn Any` map, keeping a
-    /// `CastKey<dyn Foo>`).
+    /// `CastKey<dyn Foo, M::Key>`).
+    ///
+    /// This method needs the `coerce_unsized` feature.
+    #[cfg(feature = "coerce_unsized")]
     #[inline]
-    pub fn insert_as<SourcePtr>(
-        &mut self,
-        value: SourcePtr,
-    ) -> CastKey<SourcePtr::Target, M::Key>
+    pub fn insert_as<SourcePtr>(&mut self, value: SourcePtr) -> CastKey<SourcePtr::Target, M::Key>
     where
         SourcePtr: std::ops::CoerceUnsized<M::Value> + StableDeref,
         SourcePtr::Target: Pointee<Metadata: Copy>,
     {
-        self.insert_as_with_key(|_| value)
+        // Source-typed metadata, read before the coercion erases it; the
+        // coercion never changes the allocation's address.
+        let metadata = std::ptr::metadata(&*value as *const SourcePtr::Target);
+        let value: M::Value = value;
+        CastKey::from_raw_parts(self.inner.insert(value), metadata)
     }
 
     /// Inserts a smart pointer produced by `func`, returning a key typed with
@@ -388,12 +414,16 @@ where
     /// is read through the source pointer's deref *before* the coercion: the
     /// deref must describe the same, stable allocation the map ends up
     /// owning.
+    ///
+    /// This method needs the `coerce_unsized` feature.
+    #[cfg(feature = "coerce_unsized")]
     #[inline]
     pub fn insert_as_with_key<SourcePtr>(
         &mut self,
         func: impl FnOnce(M::Key) -> SourcePtr,
     ) -> CastKey<SourcePtr::Target, M::Key>
     where
+        M: InsertWithKey,
         SourcePtr: std::ops::CoerceUnsized<M::Value> + StableDeref,
         SourcePtr::Target: Pointee<Metadata: Copy>,
     {
@@ -403,12 +433,16 @@ where
 
     /// Like [`insert_as_with_key`](Self::insert_as_with_key) but the closure
     /// may return `Err`, in which case nothing is inserted.
+    ///
+    /// This method needs the `coerce_unsized` feature.
+    #[cfg(feature = "coerce_unsized")]
     #[inline]
     pub fn try_insert_as_with_key<SourcePtr, E>(
         &mut self,
         func: impl FnOnce(M::Key) -> Result<SourcePtr, E>,
     ) -> Result<CastKey<SourcePtr::Target, M::Key>, E>
     where
+        M: InsertWithKey,
         SourcePtr: std::ops::CoerceUnsized<M::Value> + StableDeref,
         SourcePtr::Target: Pointee<Metadata: Copy>,
     {
@@ -420,8 +454,7 @@ where
                 let concrete: SourcePtr = func(inner_key)?;
                 // Source-typed metadata, read before the coercion erases it;
                 // the coercion never changes the allocation's address.
-                saved_metadata =
-                    Some(std::ptr::metadata(&*concrete as *const SourcePtr::Target));
+                saved_metadata = Some(std::ptr::metadata(&*concrete as *const SourcePtr::Target));
                 Ok(concrete)
             })?;
 
@@ -430,8 +463,7 @@ where
 
     // ── cast_key_of ──────────────────────────────────────────────────────
 
-    /// Converts a backing `slotmap` key into a full [`CastKey`] by reading the
-    /// stored value's pointer metadata. Returns `None` if the key is stale.
+    /// Builds a [`CastKey`] for the value under a backing key.
     #[inline]
     pub fn cast_key_of(&self, key: M::Key) -> Option<CastKey<MTarget<M>, M::Key>> {
         let reference = self.inner.get(key)?;
@@ -454,24 +486,24 @@ where
         <T as Pointee>::Metadata: Copy,
     {
         let stored = self.inner.get(key.inner_key())?;
-        let base: &MTarget<M> = &**stored;
+        let base: &MTarget<M> = stored;
         let data_ptr: *const () = (base as *const MTarget<M>).cast();
         let typed_ptr: *const T = std::ptr::from_raw_parts(data_ptr, key.metadata());
         Some(&*typed_ptr)
     }
 
-    /// Shared-reference lookup without bounds or version checks.
+    /// Like [`get`](Self::get), but without checking that a value is under the
+    /// key.
     ///
     /// # Safety
-    /// - The key's slot must be occupied with the matching version.
-    /// - The key's pointer metadata must be valid for the data in that slot.
+    /// A value must be under the key, and the key's metadata must fit it.
     #[inline]
     pub unsafe fn get_unchecked<T: ?Sized + Pointee>(&self, key: CastKey<T, M::Key>) -> &T
     where
         <T as Pointee>::Metadata: Copy,
     {
         let stored = self.inner.get_unchecked(key.inner_key());
-        let base: &MTarget<M> = &**stored;
+        let base: &MTarget<M> = stored;
         let data_ptr: *const () = (base as *const MTarget<M>).cast();
         let typed_ptr: *const T = std::ptr::from_raw_parts(data_ptr, key.metadata());
         &*typed_ptr
@@ -528,7 +560,7 @@ where
 
 impl<M> UnsafeCastMapG<M>
 where
-    M: SlotMapTrait,
+    M: Map,
     M::Value: StableDeref + DerefMut,
     MTarget<M>: Pointee,
     <MTarget<M> as Pointee>::Metadata: Copy,
@@ -544,17 +576,17 @@ where
         <T as Pointee>::Metadata: Copy,
     {
         let stored = self.inner.get_mut(key.inner_key())?;
-        let base: &mut MTarget<M> = &mut **stored;
+        let base: &mut MTarget<M> = stored;
         let data_ptr: *mut () = (base as *mut MTarget<M>).cast();
         let typed_ptr: *mut T = std::ptr::from_raw_parts_mut(data_ptr, key.metadata());
         Some(&mut *typed_ptr)
     }
 
-    /// Mutable-reference lookup without bounds or version checks.
+    /// Like [`get_mut`](Self::get_mut), but without checking that a value is
+    /// under the key.
     ///
     /// # Safety
-    /// - The key's slot must be occupied with the matching version.
-    /// - The key's pointer metadata must be valid for the data in that slot.
+    /// A value must be under the key, and the key's metadata must fit it.
     #[inline]
     pub unsafe fn get_unchecked_mut<T: ?Sized + Pointee>(
         &mut self,
@@ -564,7 +596,7 @@ where
         <T as Pointee>::Metadata: Copy,
     {
         let stored = self.inner.get_unchecked_mut(key.inner_key());
-        let base: &mut MTarget<M> = &mut **stored;
+        let base: &mut MTarget<M> = stored;
         let data_ptr: *mut () = (base as *mut MTarget<M>).cast();
         let typed_ptr: *mut T = std::ptr::from_raw_parts_mut(data_ptr, key.metadata());
         &mut *typed_ptr
@@ -603,6 +635,7 @@ where
         keys: [CastKey<T, M::Key>; N],
     ) -> Option<[&mut T; N]>
     where
+        M: GetDisjointMut,
         <T as Pointee>::Metadata: Copy,
     {
         let metadata = keys.map(|k| k.metadata());
@@ -612,7 +645,7 @@ where
         let out = stored.map(|p| {
             let meta = metadata[i];
             i += 1;
-            let base: &mut MTarget<M> = &mut **p;
+            let base: &mut MTarget<M> = p;
             let data_ptr: *mut () = (base as *mut MTarget<M>).cast();
             unsafe { &mut *std::ptr::from_raw_parts_mut(data_ptr, meta) }
         });
@@ -631,6 +664,7 @@ where
         keys: [CastKey<T, M::Key>; N],
     ) -> [&mut T; N]
     where
+        M: GetDisjointMut,
         <T as Pointee>::Metadata: Copy,
     {
         let metadata = keys.map(|k| k.metadata());
@@ -640,7 +674,7 @@ where
         stored.map(|p| {
             let meta = metadata[i];
             i += 1;
-            let base: &mut MTarget<M> = &mut **p;
+            let base: &mut MTarget<M> = p;
             let data_ptr: *mut () = (base as *mut MTarget<M>).cast();
             unsafe { &mut *std::ptr::from_raw_parts_mut(data_ptr, meta) }
         })
@@ -651,28 +685,24 @@ where
 
 impl<M> UnsafeCastMapG<M>
 where
-    M: SlotMapTrait,
+    M: Detach,
     M::Value: StableDeref,
 {
-    /// Detaches an element by its backing `slotmap` key, returning the stored
-    /// pointer but keeping the slot reservable so the key can be reused with
-    /// [`reattach_by_inner_key`](Self::reattach_by_inner_key). Forwards to
-    /// `slotmap`'s `detach`, which both `SlotMap` and `DenseSlotMap` provide.
+    /// Removes and returns the value under a backing key, and keeps the key
+    /// reserved for [`reattach_by_inner_key`](Self::reattach_by_inner_key).
     #[inline]
     pub fn detach_by_inner_key(&mut self, key: M::Key) -> Option<M::Value> {
         self.inner.detach(key)
     }
 
-    /// Reattaches an already-erased `value` (e.g. a `Box<dyn Any>`) at a slot
-    /// previously freed with [`detach_by_inner_key`](Self::detach_by_inner_key),
-    /// reusing `key`.
+    /// Puts `value` back under a key whose value was detached.
     ///
-    /// # Panics
-    /// Panics if `key` is not in a detached state (and, for dense storage, if
-    /// the map is full) — mirrors `slotmap`'s `reattach`.
+    /// # Errors
+    /// Hands `value` back if `key` is not detached. The `slotmap` maps panic
+    /// instead.
     #[inline]
-    pub fn reattach_by_inner_key(&mut self, key: M::Key, value: M::Value) {
-        self.inner.reattach(key, value);
+    pub fn reattach_by_inner_key(&mut self, key: M::Key, value: M::Value) -> Result<(), M::Value> {
+        self.inner.reattach(key, value)
     }
 }
 
@@ -680,7 +710,7 @@ where
 
 impl<M> UnsafeCastMapG<M>
 where
-    M: SlotMapTrait,
+    M: Detach,
     M::Value: StableDeref,
     MTarget<M>: Pointee,
     <MTarget<M> as Pointee>::Metadata: Copy,
@@ -711,15 +741,15 @@ where
 /// Shared iterator over `(CastKey, &Target)` pairs.
 pub struct Iter<'a, M>
 where
-    M: SlotMapTrait + 'a,
+    M: Map + 'a,
     M::Value: 'a,
 {
-    inner: <M as SlotMapTrait>::Iter<'a>,
+    inner: <M as Map>::Iter<'a>,
 }
 
 impl<'a, M> Iterator for Iter<'a, M>
 where
-    M: SlotMapTrait + 'a,
+    M: Map + 'a,
     M::Value: StableDeref + 'a,
     MTarget<M>: Pointee,
     <MTarget<M> as Pointee>::Metadata: Copy,
@@ -729,7 +759,7 @@ where
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         let (k, p) = self.inner.next()?;
-        let r: &'a MTarget<M> = &**p;
+        let r: &'a MTarget<M> = p;
         Some((to_castable::<M::Key, MTarget<M>>(k, r), r))
     }
 
@@ -744,15 +774,15 @@ where
 /// Mutable iterator over `(CastKey, &mut Target)` pairs.
 pub struct IterMut<'a, M>
 where
-    M: SlotMapTrait + 'a,
+    M: Map + 'a,
     M::Value: 'a,
 {
-    inner: <M as SlotMapTrait>::IterMut<'a>,
+    inner: <M as Map>::IterMut<'a>,
 }
 
 impl<'a, M> Iterator for IterMut<'a, M>
 where
-    M: SlotMapTrait + 'a,
+    M: Map + 'a,
     M::Value: StableDeref + DerefMut + 'a,
     MTarget<M>: Pointee,
     <MTarget<M> as Pointee>::Metadata: Copy,
@@ -777,15 +807,15 @@ where
 /// Draining iterator over `(CastKey, value)`, emptying the map.
 pub struct Drain<'a, M>
 where
-    M: SlotMapTrait + 'a,
+    M: Map + 'a,
     M::Value: 'a,
 {
-    inner: <M as SlotMapTrait>::Drain<'a>,
+    inner: <M as Map>::Drain<'a>,
 }
 
 impl<'a, M> Iterator for Drain<'a, M>
 where
-    M: SlotMapTrait + 'a,
+    M: Map + 'a,
     M::Value: StableDeref + 'a,
     MTarget<M>: Pointee,
     <MTarget<M> as Pointee>::Metadata: Copy,
@@ -807,17 +837,18 @@ where
 
 // ─── IntoIter (owning) ───────────────────────────────────────────────────────
 
-/// Owning iterator over `(CastKey, value)` pairs.
+/// Owning iterator over `(CastKey, value)` pairs. It needs a backing map that
+/// implements `IntoIterator`.
 pub struct IntoIter<M>
 where
-    M: SlotMapTrait,
+    M: Map + IntoIterator<Item = (<M as Map>::Key, <M as Map>::Value)>,
 {
-    inner: <M as SlotMapTrait>::IntoIter,
+    inner: <M as IntoIterator>::IntoIter,
 }
 
 impl<M> Iterator for IntoIter<M>
 where
-    M: SlotMapTrait,
+    M: Map + IntoIterator<Item = (<M as Map>::Key, <M as Map>::Value)>,
     M::Value: StableDeref,
     MTarget<M>: Pointee,
     <MTarget<M> as Pointee>::Metadata: Copy,
@@ -839,7 +870,7 @@ where
 
 impl<M> IntoIterator for UnsafeCastMapG<M>
 where
-    M: SlotMapTrait,
+    M: Map + IntoIterator<Item = (<M as Map>::Key, <M as Map>::Value)>,
     M::Value: StableDeref,
     MTarget<M>: Pointee,
     <MTarget<M> as Pointee>::Metadata: Copy,
@@ -850,14 +881,14 @@ where
     #[inline]
     fn into_iter(self) -> Self::IntoIter {
         IntoIter {
-            inner: self.inner.into_pairs(),
+            inner: self.inner.into_iter(),
         }
     }
 }
 
 impl<'a, M> IntoIterator for &'a UnsafeCastMapG<M>
 where
-    M: SlotMapTrait + 'a,
+    M: Map + 'a,
     M::Value: StableDeref + 'a,
     MTarget<M>: Pointee,
     <MTarget<M> as Pointee>::Metadata: Copy,
@@ -873,7 +904,7 @@ where
 
 impl<'a, M> IntoIterator for &'a mut UnsafeCastMapG<M>
 where
-    M: SlotMapTrait + 'a,
+    M: Map + 'a,
     M::Value: StableDeref + DerefMut + 'a,
     MTarget<M>: Pointee,
     <MTarget<M> as Pointee>::Metadata: Copy,
@@ -890,15 +921,27 @@ where
 // ─── Type aliases ──────────────────────────────────────────────────────────────
 
 /// Raw castable-key map backed by [`slotmap::SlotMap`] (sparse storage).
+#[cfg(feature = "slotmap")]
 pub type UnsafeCastMap<K, Ptr> = UnsafeCastMapG<SlotMap<K, Ptr>>;
 
 /// Raw castable-key map backed by [`slotmap::DenseSlotMap`]: values are stored
 /// contiguously for fast iteration, at the cost of one extra indirection per
 /// lookup, and `remove` swaps the last element into the vacated position.
+#[cfg(feature = "slotmap")]
 pub type UnsafeDenseCastMap<K, Ptr> = UnsafeCastMapG<DenseSlotMap<K, Ptr>>;
 
 /// Convenience alias: [`UnsafeCastMap`] storing `Box<T>`
+#[cfg(feature = "slotmap")]
 pub type UnsafeBoxCastMap<K, T> = UnsafeCastMap<K, Box<T>>;
 
 /// Convenience alias: [`UnsafeDenseCastMap`] storing `Box<T>`
+#[cfg(feature = "slotmap")]
 pub type UnsafeBoxDenseCastMap<K, T> = UnsafeDenseCastMap<K, Box<T>>;
+
+/// Raw castable-key map backed by a [`gen_map::GenMap`] with config `C`.
+#[cfg(feature = "gen_map")]
+pub type UnsafeGenCastMap<Ptr, C = DefaultMapConfig> = UnsafeCastMapG<GenMap<Ptr, C>>;
+
+/// An [`UnsafeGenCastMap`] that stores `Box<T>`.
+#[cfg(feature = "gen_map")]
+pub type UnsafeBoxGenCastMap<T, C = DefaultMapConfig> = UnsafeGenCastMap<Box<T>, C>;

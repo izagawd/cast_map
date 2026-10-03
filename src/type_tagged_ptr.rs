@@ -9,13 +9,18 @@
 //! wrapped pointer (`Box`, `Rc`, `Arc`, `&T`, `&mut T`, ...). Custom stored
 //! pointer types can participate by implementing [`ConcreteTypeId`].
 
-use std::any::TypeId;
-use std::ops::{CoerceUnsized, Deref, DerefMut};
+use std::any::{Any, TypeId};
+#[cfg(feature = "coerce_unsized")]
+use std::ops::CoerceUnsized;
+use std::ops::{Deref, DerefMut};
 use std::ptr::Pointee;
 
 use stable_deref_trait::StableDeref;
 
+use crate::any_haver::{type_id_from_metadata, AnyHaver};
 use crate::retype_ptr::RetypePtr;
+#[cfg(feature = "coerce_unsized")]
+use crate::stable_coerce::StableCoerce;
 
 // ─── TypeTaggedPtr ───────────────────────────────────────────────────────────
 
@@ -27,6 +32,10 @@ use crate::retype_ptr::RetypePtr;
 /// `TypeTaggedBox::new`) and preserved across unsizing coercions
 /// (`TypeTaggedPtr<Box<Dog>> -> TypeTaggedPtr<Box<dyn Animal>>`), since
 /// unsizing only touches the inner pointer.
+///
+/// Those coercions need the `coerce_unsized` feature. Without it,
+/// [`from_any`](Self::from_any) and [`from_any_haver`](Self::from_any_haver)
+/// wrap a pointer that is already unsized.
 ///
 /// # Invariant
 /// `type_id` is always the [`TypeId`] of the concrete type of `ptr`'s
@@ -42,7 +51,7 @@ pub struct TypeTaggedPtr<P> {
 /// [`TypeTaggedPtr`] wrapping a [`Box`]: an owning, pointer-stable form
 /// that remembers the concrete [`TypeId`] of the value it was constructed
 /// from.
-pub type TypeTaggedBox<T: ?Sized> = TypeTaggedPtr<Box<T>>;
+pub type TypeTaggedBox<T> = TypeTaggedPtr<Box<T>>;
 
 impl<T: 'static> TypeTaggedPtr<Box<T>> {
     /// Boxes `value`, recording `TypeId::of::<T>()`.
@@ -106,6 +115,58 @@ impl<P> TypeTaggedPtr<P> {
     }
 }
 
+impl<P> TypeTaggedPtr<P>
+where
+    P: StableDeref,
+    P::Target: DynAny,
+{
+    /// Wraps a pointer to a [`DynAny`], recording the type id that the value
+    /// reports.
+    ///
+    /// ```
+    /// use std::any::{Any, TypeId};
+    /// use cast_map::{ConcreteTypeId, TypeTaggedBox};
+    ///
+    /// let tagged: TypeTaggedBox<dyn Any> =
+    ///     TypeTaggedBox::from_any(Box::new(5u32));
+    /// assert_eq!(tagged.concrete_type_id(), TypeId::of::<u32>());
+    /// ```
+    #[inline]
+    pub fn from_any(ptr: P) -> Self {
+        let type_id = DynAny::value_type_id(&*ptr);
+        Self { ptr, type_id }
+    }
+}
+
+impl<P> TypeTaggedPtr<P>
+where
+    P: StableDeref,
+    P::Target: AnyHaver + Pointee,
+{
+    /// Wraps a pointer to an [`AnyHaver`], recording the type id that its
+    /// pointer metadata implies.
+    ///
+    /// ```
+    /// use std::any::TypeId;
+    /// use cast_map::{AnyHaver, ConcreteTypeId, TypeTaggedBox};
+    ///
+    /// trait Pet: AnyHaver {}
+    ///
+    /// struct Dog;
+    /// impl Pet for Dog {}
+    ///
+    /// let tagged: TypeTaggedBox<dyn Pet> =
+    ///     TypeTaggedBox::from_any_haver(Box::new(Dog));
+    /// assert_eq!(tagged.concrete_type_id(), TypeId::of::<Dog>());
+    /// ```
+    #[inline]
+    pub fn from_any_haver(ptr: P) -> Self {
+        let metadata = std::ptr::metadata(&*ptr as *const P::Target);
+        let type_id = type_id_from_metadata::<P::Target>(metadata);
+        Self { ptr, type_id }
+    }
+}
+
 impl<P: Deref> Deref for TypeTaggedPtr<P> {
     type Target = P::Target;
     #[inline]
@@ -121,7 +182,11 @@ impl<P: DerefMut> DerefMut for TypeTaggedPtr<P> {
     }
 }
 
-impl<P: CoerceUnsized<Q>, Q> CoerceUnsized<TypeTaggedPtr<Q>> for TypeTaggedPtr<P> {}
+// A `TypeTaggedPtr<P>` coerces to a `TypeTaggedPtr<Q>` when `P` coerces to `Q`.
+// The `StableCoerce` bound requires `P` to keep pointing at the same value
+// through that coercion, so the recorded type id stays correct.
+#[cfg(feature = "coerce_unsized")]
+impl<P: CoerceUnsized<Q> + StableCoerce, Q> CoerceUnsized<TypeTaggedPtr<Q>> for TypeTaggedPtr<P> {}
 
 unsafe impl<P: StableDeref> StableDeref for TypeTaggedPtr<P> {}
 
@@ -133,6 +198,50 @@ unsafe impl<'a, P: RetypePtr<'a>> RetypePtr<'a> for TypeTaggedPtr<P> {
             ptr: self.ptr.retype(meta),
             type_id: self.type_id,
         }
+    }
+}
+
+// ─── DynAny ──────────────────────────────────────────────────────────────────
+
+/// A `dyn Any`, `dyn Any + Send` or `dyn Any + Send + Sync`, which
+/// [`TypeTaggedPtr::from_any`] takes. It is sealed, so it cannot be implemented
+/// outside this crate.
+pub trait DynAny: sealed::Sealed {
+    /// Returns the type id of the concrete type of the value.
+    fn value_type_id(&self) -> TypeId;
+}
+
+mod sealed {
+    use std::any::Any;
+
+    /// Keeps [`DynAny`](super::DynAny) from being implemented outside this
+    /// crate.
+    pub trait Sealed {}
+
+    impl Sealed for dyn Any {}
+    impl Sealed for dyn Any + Send {}
+    impl Sealed for dyn Any + Send + Sync {}
+}
+
+// `type_id` on a `dyn Any` dispatches to the concrete type.
+impl DynAny for dyn Any {
+    #[inline]
+    fn value_type_id(&self) -> TypeId {
+        self.type_id()
+    }
+}
+
+impl DynAny for dyn Any + Send {
+    #[inline]
+    fn value_type_id(&self) -> TypeId {
+        self.type_id()
+    }
+}
+
+impl DynAny for dyn Any + Send + Sync {
+    #[inline]
+    fn value_type_id(&self) -> TypeId {
+        self.type_id()
     }
 }
 
@@ -170,11 +279,12 @@ pub unsafe trait ConcreteTypeId {
     fn concrete_type_id(&self) -> TypeId;
 }
 
-// SAFETY: `type_id` is captured from the concrete, sized `P::Target` in
-// `from_ptr` (or vouched for by the caller of `from_raw_parts`) and only ever
-// carried across unsizing coercions / `retype` — whose contract requires the
-// value to actually be the target type — while `inner_mut`'s contract makes
-// any caller who swaps the pointer keep the type id accurate.
+// SAFETY: every constructor records the concrete type id. `from_ptr` takes it
+// from the sized target, `from_any` from `Any` and `from_any_haver` from
+// `AnyHaver`, and the `StableDeref` bound of the last two keeps the pointee in
+// place. The caller of `from_raw_parts` vouches for it. Unsizing and `retype`
+// keep the value's type, and `inner_mut`'s contract makes a caller who swaps
+// the pointer keep the type id accurate.
 unsafe impl<P> ConcreteTypeId for TypeTaggedPtr<P> {
     #[inline]
     fn concrete_type_id(&self) -> TypeId {

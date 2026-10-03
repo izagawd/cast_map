@@ -1,42 +1,24 @@
-//! Castable-key wrappers over the [`slotmap`] crate's
-//! [`SlotMap`](slotmap::SlotMap) and [`DenseSlotMap`](slotmap::DenseSlotMap).
+//! This crate provides maps that store type-erased values, such as
+//! `TypeTaggedBox<dyn Any>`, and hand out typed [`CastKey`]s, so that
+//! `map.get(key)` returns a `&T` with no `downcast_ref` at the call site.
 //!
-//! Store type-erased heterogeneous values (e.g. `TypeTaggedBox<dyn Any>`) and hand
-//! back typed [`CastKey`]s, so `map.get(key)` returns a correctly typed `&T`
-//! with no `downcast_ref` at the call site.
+//! [`CastMapG`] checks every lookup against the type id stored with the value,
+//! so a key of the wrong type returns `None`. [`UnsafeCastMapG`] skips that
+//! check, so its typed lookups are `unsafe`. Both keep their values in a
+//! backing map, which is any type that implements [`Map`].
 //!
-//! Two axes, four maps. The **checking** axis is raw vs. type-id-checked; the
-//! **storage** axis is basic vs. dense:
+//! # Cargo features
 //!
-//! - [`UnsafeCastMap`] — the low-level map over [`slotmap::SlotMap`]. Lookups
-//!   are typed via [`CastKey`], but `get` / `get_mut` / `remove`
-//!   are `unsafe`: they rebuild the typed reference from the
-//!   key's cached metadata without checking it still matches the value in the
-//!   slot, so using a key whose slot holds a different type is undefined
-//!   behavior.
-//! - [`CastMap`] — the safe, recommended API over [`slotmap::SlotMap`]. Values
-//!   are stored behind a type-tagged pointer that records their concrete
-//!   [`TypeId`](std::any::TypeId) (such as [`TypeTaggedBox`], an alias of
-//!   [`TypeTaggedPtr`]`<Box<T>>`); every keyed lookup recovers the type id implied by
-//!   the key's metadata ([`type_id_from_metadata`]) and compares it to the slot's.
-//!   A stale, mistyped, or foreign key returns `None` instead of being unsound.
-//! - [`UnsafeDenseCastMap`] / [`DenseCastMap`] — the same raw/checked pair over
-//!   [`slotmap::DenseSlotMap`], which stores values contiguously for fast
-//!   iteration. The cast-key API is identical to the basic maps'.
+//! - `slotmap` adds `slotmap::SlotMap` and `slotmap::DenseSlotMap` as backing
+//!   maps, with aliases such as `BoxCastMap<K, T>`.
+//! - `gen_map` adds `gen_map::GenMap` as a backing map, with aliases such as
+//!   `BoxGenCastMap<T, C>`.
+//! - `coerce_unsized` adds the coercion from a `TypeTaggedBox<Dog>` to a
+//!   `TypeTaggedBox<dyn Any>`, and the `insert_sized` and `insert_as` methods.
+//!   Without it, [`TypeTaggedPtr::from_any`] and
+//!   [`TypeTaggedPtr::from_any_haver`] wrap a pointer that is already unsized.
 //!
-//! All four maps support disjoint mutable access via `get_disjoint_mut` (typed,
-//! by [`CastKey`]) and `get_disjoint_mut_by_inner_key` (by backing key), each
-//! with an `unchecked` companion.
-//!
-//! Under the hood there are really just **two** generic types,
-//! [`UnsafeCastMapG`] and [`CastMapG`], each parameterized over a backing
-//! `slotmap` map `M` implementing [`SlotMapTrait`]. The four maps above are
-//! type aliases that pin `M` to `SlotMap` or `DenseSlotMap`.
-//!
-//! For the common case use the aliases [`BoxCastMap`] / [`BoxDenseCastMap`]
-//! (which store [`TypeTaggedBox`]) — typically with `dyn Any`:
-//! `BoxCastMap<DefaultKey, dyn Any>`. The raw maps have [`UnsafeBoxCastMap`] /
-//! [`UnsafeBoxDenseCastMap`], storing plain `Box`.
+//! None of them is on by default.
 //!
 //! # `AnyHaver` and key types
 //! Checked lookups require `T: AnyHaver`, an **`unsafe` trait** that recovers a
@@ -49,21 +31,23 @@
 //! [`get_by_inner_key`](CastMapG::get_by_inner_key) instead.
 //!
 //! # Dyn-dispatchable keys
-//! [`DynKey`] (via [`CastKey::as_dyn`]) reshapes a borrowed key into a valid
-//! trait-object method receiver, so traits can declare
-//! `fn m(self: DynKey<Self>, ..)` and be dispatched through `DynKey<dyn Trait>`
-//! using the vtable already cached in the key — no map access needed for the
-//! dispatch itself.
+//! [`DynKey`] (via [`CastKey::as_dyn`]) is a borrowed key that can be a trait
+//! method receiver, so a method declared as `fn m(self: DynKey<Self, K>, ..)`
+//! can be called through a `DynKey<dyn Trait, K>`. [`upcast_key!`] upcasts a
+//! [`CastKey`] through a `DynKey`.
 //!
 //! # Nightly
 //! Pointer-metadata reconstruction and the dyn-dispatchable key rely on the
-//! unstable `ptr_metadata`, `coerce_unsized`, `unsize`, `dispatch_from_dyn`,
-//! `arbitrary_self_types`, and `arbitrary_self_types_pointers` features, so
-//! this crate requires a **nightly** toolchain.
+//! unstable `ptr_metadata`, `derive_coerce_pointee` and `arbitrary_self_types`
+//! features, so this crate requires a **nightly** toolchain. The crate's
+//! `coerce_unsized` feature also turns on the unstable `coerce_unsized`
+//! feature.
 //!
 //! # Example
+//! This example needs the `slotmap` and `coerce_unsized` features.
+//!
 //! ```ignore
-//! use cast_slotmap::{BoxCastMap, TypeTaggedBox, CastKey, DefaultKey};
+//! use cast_map::{BoxCastMap, TypeTaggedBox, CastKey, DefaultKey};
 //! use std::any::Any;
 //!
 //! struct Dog { name: String }
@@ -71,54 +55,74 @@
 //! let mut map: BoxCastMap<DefaultKey, dyn Any> = BoxCastMap::new();
 //!
 //! // Insert a concrete type into a `dyn Any` map; the key comes back typed.
-//! let dog_key: CastKey<Dog> = map.insert_sized(TypeTaggedBox::new(Dog { name: "Rex".into() }));
+//! let dog_key: CastKey<Dog, DefaultKey> = map.insert_sized(TypeTaggedBox::new(Dog { name: "Rex".into() }));
 //!
 //! assert_eq!(map.get(dog_key).unwrap().name, "Rex");
 //!
 //! // Or insert erased and recover the typed key later.
-//! let dyn_key: CastKey<dyn Any> = map.insert(TypeTaggedBox::new(Dog { name: "Ax".into() }));
-//! let typed: CastKey<Dog> = map.downcast_key::<Dog>(dyn_key.inner_key()).unwrap();
+//! let dyn_key: CastKey<dyn Any, DefaultKey> = map.insert(TypeTaggedBox::new(Dog { name: "Ax".into() }));
+//! let typed: CastKey<Dog, DefaultKey> = map.downcast_key::<Dog>(dyn_key.inner_key()).unwrap();
 //! ```
 #![feature(ptr_metadata)]
-#![feature(coerce_unsized)]
-#![feature(unsize)]
-#![feature(dispatch_from_dyn)]
+#![feature(derive_coerce_pointee)]
 #![feature(arbitrary_self_types)]
-#![feature(arbitrary_self_types_pointers)]
+#![cfg_attr(feature = "coerce_unsized", feature(coerce_unsized))]
 
 pub mod any_haver;
 pub mod cast_key;
 pub mod cast_map;
 pub mod dyn_key;
+#[cfg(feature = "gen_map")]
+mod gen_map_impl;
+pub mod map;
 pub mod retype_ptr;
-pub mod slotmap_trait;
+#[cfg(feature = "slotmap")]
+mod slotmap_impl;
+#[cfg(feature = "coerce_unsized")]
+pub mod stable_coerce;
 pub mod type_tagged_ptr;
 pub mod unsafe_cast_map;
 
 // Re-export the slotmap items callers need so they don't have to depend on
 // `slotmap` directly for the common path.
+#[cfg(feature = "slotmap")]
 pub use slotmap::{new_key_type, DefaultKey, Key, KeyData};
 
 #[doc(inline)]
-pub use any_haver::{type_id_from_metadata, AnyHaver};
+pub use any_haver::{type_id_from_metadata, AnyHaver, MetadataPtr};
 #[doc(inline)]
 pub use cast_key::CastKey;
 #[doc(inline)]
-pub use cast_map::{BoxCastMap, BoxDenseCastMap, CastMap, CastMapG, DenseCastMap};
+pub use cast_map::CastMapG;
+#[cfg(feature = "slotmap")]
+#[doc(inline)]
+pub use cast_map::{BoxCastMap, BoxDenseCastMap, CastMap, DenseCastMap};
+#[cfg(feature = "gen_map")]
+#[doc(inline)]
+pub use cast_map::{BoxGenCastMap, GenCastMap};
 #[doc(inline)]
 pub use dyn_key::DynKey;
 #[doc(inline)]
+pub use map::{Capacity, Detach, GetDisjointMut, InsertWithKey, Map, Reserve};
+#[doc(inline)]
 pub use retype_ptr::RetypePtr;
+#[cfg(feature = "coerce_unsized")]
 #[doc(inline)]
-pub use slotmap_trait::SlotMapTrait;
-#[doc(inline)]
-pub use type_tagged_ptr::{ConcreteTypeId, TypeTaggedBox, TypeTaggedPtr};
+pub use stable_coerce::StableCoerce;
 #[doc(no_inline)]
 pub use stable_deref_trait::StableDeref;
 #[doc(inline)]
+pub use type_tagged_ptr::{ConcreteTypeId, DynAny, TypeTaggedBox, TypeTaggedPtr};
+#[doc(inline)]
+pub use unsafe_cast_map::UnsafeCastMapG;
+#[cfg(feature = "slotmap")]
+#[doc(inline)]
 pub use unsafe_cast_map::{
-    UnsafeBoxCastMap, UnsafeBoxDenseCastMap, UnsafeCastMap, UnsafeCastMapG, UnsafeDenseCastMap,
+    UnsafeBoxCastMap, UnsafeBoxDenseCastMap, UnsafeCastMap, UnsafeDenseCastMap,
 };
+#[cfg(feature = "gen_map")]
+#[doc(inline)]
+pub use unsafe_cast_map::{UnsafeBoxGenCastMap, UnsafeGenCastMap};
 
 #[cfg(test)]
 mod tests;

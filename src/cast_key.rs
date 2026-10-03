@@ -1,36 +1,25 @@
-//! The castable key type for the cast slot maps.
+//! [`CastKey<T, K>`] is the key of the cast maps. It holds a key of the backing
+//! map and the pointer metadata of `T`.
 //!
-//! [`CastKey<T, K>`] stores a `slotmap` key alongside `T`'s pointer metadata.
-//! It is the bare key of [`UnsafeCastMapG`](crate::unsafe_cast_map::UnsafeCastMapG);
-//! the checked [`CastMapG`](crate::cast_map::CastMapG) uses the *same* key type
-//! and validates lookups against each slot's stored concrete
-//! [`TypeId`](std::any::TypeId) (see [`ConcreteTypeId`](crate::type_tagged_ptr::ConcreteTypeId)).
-//!
-//! `CastKey` is not a `slotmap::Key`; the map wrappers convert at the boundary
-//! via [`inner_key`](CastKey::inner_key).
-//!
-//! Because `slotmap`'s keys are `Copy`, a `CastKey` simply holds the key by
-//! value. For dyn dispatch on a key, see [`DynKey`](crate::dyn_key::DynKey) /
-//! [`as_dyn`](CastKey::as_dyn).
+//! For dyn dispatch on a key, see [`DynKey`]. To upcast a key, use
+//! [`upcast_key!`](crate::upcast_key).
 
 use std::any::TypeId;
 use std::ops::Receiver;
 use std::ptr::Pointee;
-
-use slotmap::{DefaultKey, Key, KeyData};
 
 use crate::any_haver::{type_id_from_metadata, AnyHaver};
 use crate::dyn_key::DynKey;
 
 // ─── CastKey<T, K> ───────────────────────────────────────────────────────────
 
-/// A key parameterized over `T: ?Sized` that stores the backing `slotmap` key
-/// (`K`, defaults to [`DefaultKey`]) plus `T`'s pointer metadata.
+/// A key of the backing map, of type `K`, together with the pointer metadata of
+/// `T`.
 ///
 /// # Sizes (64-bit)
-/// - `CastKey<SizedType>`: the size of `K` (metadata is `()`).
-/// - `CastKey<dyn Trait>`: `K` + a vtable pointer.
-pub struct CastKey<T: ?Sized + Pointee, K: Key = DefaultKey>
+/// - `CastKey<SizedType, K>` is the size of `K`, because its metadata is `()`.
+/// - `CastKey<dyn Trait, K>` holds a `K` and a vtable pointer.
+pub struct CastKey<T: ?Sized + Pointee, K: Copy>
 where
     <T as Pointee>::Metadata: Copy,
 {
@@ -38,7 +27,7 @@ where
     pub(crate) metadata: <T as Pointee>::Metadata,
 }
 
-impl<T: ?Sized + Pointee, K: Key> Clone for CastKey<T, K>
+impl<T: ?Sized + Pointee, K: Copy> Clone for CastKey<T, K>
 where
     <T as Pointee>::Metadata: Copy,
 {
@@ -48,9 +37,9 @@ where
     }
 }
 
-impl<T: ?Sized + Pointee, K: Key> Copy for CastKey<T, K> where <T as Pointee>::Metadata: Copy {}
+impl<T: ?Sized + Pointee, K: Copy> Copy for CastKey<T, K> where <T as Pointee>::Metadata: Copy {}
 
-impl<T: ?Sized + Pointee, K: Key> std::fmt::Debug for CastKey<T, K>
+impl<T: ?Sized + Pointee, K: Copy + std::fmt::Debug> std::fmt::Debug for CastKey<T, K>
 where
     <T as Pointee>::Metadata: Copy,
 {
@@ -60,7 +49,7 @@ where
     }
 }
 
-impl<T: ?Sized + Pointee, K: Key> PartialEq for CastKey<T, K>
+impl<T: ?Sized + Pointee, K: Copy + PartialEq> PartialEq for CastKey<T, K>
 where
     <T as Pointee>::Metadata: Copy,
 {
@@ -71,20 +60,18 @@ where
     }
 }
 
-// A receiver without `Deref`: lets traits take `self: CastKey<Self>` by
-// value (`arbitrary_self_types`). Static dispatch only — dyn dispatch needs
-// the pointer-shaped `DynKey`.
-impl<T: ?Sized + Pointee, K: Key> Receiver for CastKey<T, K>
+// A trait method can take `self: CastKey<Self, K>`, but only for static
+// dispatch. Dyn dispatch needs the pointer-shaped `DynKey`.
+impl<T: ?Sized + Pointee, K: Copy> Receiver for CastKey<T, K>
 where
     <T as Pointee>::Metadata: Copy,
 {
     type Target = T;
 }
 
+impl<T: ?Sized + Pointee, K: Copy + Eq> Eq for CastKey<T, K> where <T as Pointee>::Metadata: Copy {}
 
-impl<T: ?Sized + Pointee, K: Key> Eq for CastKey<T, K> where <T as Pointee>::Metadata: Copy {}
-
-impl<T: ?Sized + Pointee, K: Key> std::hash::Hash for CastKey<T, K>
+impl<T: ?Sized + Pointee, K: Copy + std::hash::Hash> std::hash::Hash for CastKey<T, K>
 where
     <T as Pointee>::Metadata: Copy,
 {
@@ -94,50 +81,27 @@ where
     }
 }
 
-impl<T: ?Sized + Pointee, K: Key> CastKey<T, K>
+impl<T: ?Sized + Pointee, K: Copy> CastKey<T, K>
 where
     <T as Pointee>::Metadata: Copy,
 {
-    /// Returns the backing `slotmap` [`KeyData`].
-    #[inline]
-    pub fn key_data(&self) -> KeyData {
-        self.key.data()
-    }
-
     /// Returns the pointer metadata for `T`.
     #[inline]
     pub fn metadata(&self) -> <T as Pointee>::Metadata {
         self.metadata
     }
 
-    /// Strips the pointer metadata, producing the backing `slotmap` key.
+    /// Returns the key of the backing map.
     #[inline]
     pub fn inner_key(&self) -> K {
         self.key
     }
 
     /// Borrows this key into its dyn-dispatchable form, usable as a trait
-    /// method receiver (`fn m(self: DynKey<Self>, ..)`).
+    /// method receiver (`fn m(self: DynKey<Self, K>, ..)`).
     #[inline]
     pub fn as_dyn(&self) -> DynKey<'_, T, K> {
         DynKey::new(self)
-    }
-
-    /// Upcasts the key's metadata from `T` to `U` where `T: Unsize<U>`
-    /// (e.g. `CastKey<Dog>` to `CastKey<dyn Any>`) without needing a data
-    /// pointer.
-    #[inline]
-    pub fn upcast<U: ?Sized + Pointee>(self) -> CastKey<U, K>
-    where
-        T: std::marker::Unsize<U>,
-        <U as Pointee>::Metadata: Copy,
-    {
-        let dummy: *const T = std::ptr::from_raw_parts(std::ptr::null::<()>(), self.metadata);
-        let upcast: *const U = dummy;
-        CastKey {
-            key: self.key,
-            metadata: std::ptr::metadata(upcast),
-        }
     }
 
     /// Builds a cast key from raw parts.
@@ -147,7 +111,19 @@ where
     }
 }
 
-impl<T: ?Sized + AnyHaver + Pointee, K: Key> CastKey<T, K>
+#[cfg(feature = "slotmap")]
+impl<T: ?Sized + Pointee, K: slotmap::Key> CastKey<T, K>
+where
+    <T as Pointee>::Metadata: Copy,
+{
+    /// Returns the backing `slotmap` [`KeyData`](slotmap::KeyData).
+    #[inline]
+    pub fn key_data(&self) -> slotmap::KeyData {
+        self.key.data()
+    }
+}
+
+impl<T: ?Sized + AnyHaver + Pointee, K: Copy> CastKey<T, K>
 where
     <T as Pointee>::Metadata: Copy,
 {
@@ -158,4 +134,46 @@ where
         (type_id_from_metadata::<T>(self.metadata) == TypeId::of::<Concrete>())
             .then(|| CastKey::from_raw_parts(self.key, ()))
     }
+}
+
+// ─── upcast_key! ─────────────────────────────────────────────────────────────
+
+/// Upcasts a [`CastKey`], such as from a `CastKey<Dog, K>` to a
+/// `CastKey<dyn Pet, K>`. It borrows the key as a [`DynKey`], coerces the
+/// `DynKey` and turns it back into a `CastKey`.
+///
+/// `upcast_key!(key, Type)` upcasts to `Type`. `upcast_key!(key)` and
+/// `upcast_key!(key, _)` upcast to the type that the surrounding code expects,
+/// such as the type of a `let` binding or of a parameter. Where nothing expects
+/// a type, the key keeps its own.
+///
+/// ```
+/// use cast_map::{upcast_key, AnyHaver, CastKey};
+///
+/// trait Pet: AnyHaver {}
+///
+/// struct Dog;
+/// impl Pet for Dog {}
+///
+/// let dog: CastKey<Dog, usize> = CastKey::from_raw_parts(7, ());
+/// let pet = upcast_key!(dog, dyn Pet);
+/// let same_pet: CastKey<dyn Pet, usize> = upcast_key!(dog);
+/// assert_eq!(pet, same_pet);
+/// assert!(pet.downcast::<Dog>().is_some());
+/// ```
+#[macro_export]
+macro_rules! upcast_key {
+    ($key:expr $(,)?) => {
+        // The compiler coerces the argument of `DynKey::key` to the `DynKey`
+        // that matches the `CastKey` the surrounding code expects.
+        $crate::DynKey::key(($key).as_dyn())
+    };
+    ($key:expr, _ $(,)?) => {
+        $crate::upcast_key!($key)
+    };
+    ($key:expr, $target:ty $(,)?) => {{
+        let key = $key;
+        let dyn_key: $crate::DynKey<'_, $target, _> = key.as_dyn();
+        dyn_key.key()
+    }};
 }
