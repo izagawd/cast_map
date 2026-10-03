@@ -6,10 +6,10 @@ use std::any::Any;
 
 use super::{Cat, Dog};
 use crate::any_haver::{type_id_from_metadata, AnyHaver};
-use crate::type_tagged_ptr::TypeTaggedBox;
 use crate::cast_key::CastKey;
 use crate::cast_map::BoxCastMap;
 use crate::dyn_key::DynKey;
+use crate::type_tagged_ptr::TypeTaggedBox;
 use crate::unsafe_cast_map::UnsafeBoxCastMap;
 use crate::{upcast_key, DefaultKey};
 
@@ -64,7 +64,9 @@ fn insert_sized_gives_typed_key() {
 #[test]
 fn downcast_key_right_and_wrong_type() {
     let mut map: AnyMap = AnyMap::new();
-    let dyn_key = map.insert(TypeTaggedBox::new(Dog { name: "Spot".into() }));
+    let dyn_key = map.insert(TypeTaggedBox::new(Dog {
+        name: "Spot".into(),
+    }));
 
     let recovered: CastKey<Dog, DefaultKey> = map.downcast_key::<Dog>(dyn_key.inner_key()).unwrap();
     assert_eq!(map.get(recovered).unwrap().name, "Spot");
@@ -756,9 +758,9 @@ mod dense {
     use std::any::Any;
 
     use super::{Cat, Dog};
-    use crate::type_tagged_ptr::TypeTaggedBox;
     use crate::cast_key::CastKey;
     use crate::cast_map::BoxDenseCastMap;
+    use crate::type_tagged_ptr::TypeTaggedBox;
     use crate::unsafe_cast_map::UnsafeBoxDenseCastMap;
     use crate::{upcast_key, DefaultKey};
 

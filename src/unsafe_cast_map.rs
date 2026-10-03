@@ -393,10 +393,7 @@ where
     /// This method needs the `coerce_unsized` feature.
     #[cfg(feature = "coerce_unsized")]
     #[inline]
-    pub fn insert_as<SourcePtr>(
-        &mut self,
-        value: SourcePtr,
-    ) -> CastKey<SourcePtr::Target, M::Key>
+    pub fn insert_as<SourcePtr>(&mut self, value: SourcePtr) -> CastKey<SourcePtr::Target, M::Key>
     where
         SourcePtr: std::ops::CoerceUnsized<M::Value> + StableDeref,
         SourcePtr::Target: Pointee<Metadata: Copy>,
@@ -457,8 +454,7 @@ where
                 let concrete: SourcePtr = func(inner_key)?;
                 // Source-typed metadata, read before the coercion erases it;
                 // the coercion never changes the allocation's address.
-                saved_metadata =
-                    Some(std::ptr::metadata(&*concrete as *const SourcePtr::Target));
+                saved_metadata = Some(std::ptr::metadata(&*concrete as *const SourcePtr::Target));
                 Ok(concrete)
             })?;
 

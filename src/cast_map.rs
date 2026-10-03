@@ -380,10 +380,7 @@ where
     /// This method needs the `coerce_unsized` feature.
     #[cfg(feature = "coerce_unsized")]
     #[inline]
-    pub fn insert_as<SourcePtr>(
-        &mut self,
-        value: SourcePtr,
-    ) -> CastKey<SourcePtr::Target, M::Key>
+    pub fn insert_as<SourcePtr>(&mut self, value: SourcePtr) -> CastKey<SourcePtr::Target, M::Key>
     where
         SourcePtr: std::ops::CoerceUnsized<M::Value> + StableDeref,
         SourcePtr::Target: Pointee<Metadata: Copy>,
@@ -486,10 +483,7 @@ where
     /// Returns whether the key still resolves in this map: its slot is live
     /// *and* holds a value of the key's type.
     #[inline]
-    pub fn contains_key<T: ?Sized + AnyHaver + Pointee>(
-        &self,
-        key: CastKey<T, M::Key>,
-    ) -> bool
+    pub fn contains_key<T: ?Sized + AnyHaver + Pointee>(&self, key: CastKey<T, M::Key>) -> bool
     where
         <T as Pointee>::Metadata: Copy,
     {
@@ -500,10 +494,7 @@ where
     /// vacant, the key is stale, or the key's type does not match the value at
     /// that slot.
     #[inline]
-    pub fn get<T: ?Sized + AnyHaver + Pointee>(
-        &self,
-        key: CastKey<T, M::Key>,
-    ) -> Option<&T>
+    pub fn get<T: ?Sized + AnyHaver + Pointee>(&self, key: CastKey<T, M::Key>) -> Option<&T>
     where
         <T as Pointee>::Metadata: Copy,
     {

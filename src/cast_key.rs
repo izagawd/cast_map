@@ -69,7 +69,6 @@ where
     type Target = T;
 }
 
-
 impl<T: ?Sized + Pointee, K: Copy + Eq> Eq for CastKey<T, K> where <T as Pointee>::Metadata: Copy {}
 
 impl<T: ?Sized + Pointee, K: Copy + std::hash::Hash> std::hash::Hash for CastKey<T, K>

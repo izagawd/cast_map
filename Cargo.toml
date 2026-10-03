@@ -6,7 +6,6 @@ license = "MIT"
 description = "Castable-key maps over any keyed collection. They store type-erased values, like Box<dyn Any>, and hand out typed CastKeys. The slotmap and gen_map features add backing maps from those crates. It needs a nightly compiler."
 keywords = ["slotmap", "cast", "downcast", "allocator", "arena"]
 categories = ["data-structures", "memory-management"]
-rust-version = "1.79.0"
 readme = "README.md"
 
 [features]
@@ -15,6 +14,10 @@ readme = "README.md"
 slotmap = ["dep:slotmap"]
 # Turn this on to use `gen_map::GenMap` as a backing map.
 gen_map = ["dep:gen_map"]
+# Turn this on to coerce a `TypeTaggedPtr` to one with an unsized pointee, such
+# as a `TypeTaggedBox<Dog>` to a `TypeTaggedBox<dyn Any>`, and to use the
+# `insert_sized` and `insert_as` methods.
+coerce_unsized = []
 
 [package.metadata.docs.rs]
 all-features = true
