@@ -9,11 +9,8 @@
 //! rather than a silent miss; use `downcast_key` / `get_by_inner_key` for
 //! erased access.
 //!
-//! The single method takes a **raw** `*const Self` rather than `&self`, so it
-//! can be invoked on a dangling/null data pointer: only the metadata (vtable)
-//! is consulted. That is what lets [`type_id_from_metadata`] turn a
-//! [`CastKey`](crate::cast_key::CastKey)'s stored metadata into a [`TypeId`]
-//! without a live value.
+//! The method takes a [`MetadataPtr`], which carries only pointer metadata, so
+//! [`type_id_from_metadata`] can call it without a value.
 //!
 //! Dispatch summary for `type_id_from_metadata::<T>(meta)`:
 //! - `T` sized          → `TypeId::of::<T>()`              (static, metadata is `()`)
@@ -22,11 +19,47 @@
 //!   `dyn Foo`'s vtable (supertrait methods live in the vtable).
 
 use std::any::TypeId;
-use std::ptr::Pointee;
+use std::marker::CoercePointee;
+use std::ops::Receiver;
+use std::ptr::{NonNull, Pointee};
 
-/// Exposes the concrete [`TypeId`] through a raw-`self` method so it works on
-/// metadata alone. Blanket-implemented for all `'static` **sized** types;
-/// reach it on trait objects via a supertrait bound (`trait Foo: AnyHaver`).
+/// A pointer that carries only the pointer metadata of a `T` and points at no
+/// value. It is the receiver of [`AnyHaver::haver_type_id`].
+// `CoercePointee` gives `MetadataPtr` the unsizing coercions and the dyn
+// dispatch of a pointer.
+#[derive(CoercePointee)]
+#[repr(transparent)]
+pub struct MetadataPtr<#[pointee] T: ?Sized> {
+    ptr: NonNull<T>,
+}
+
+impl<T: ?Sized> Clone for MetadataPtr<T> {
+    #[inline]
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<T: ?Sized> Copy for MetadataPtr<T> {}
+
+// `MetadataPtr` is a receiver without `Deref`, because no value sits behind it.
+impl<T: ?Sized> Receiver for MetadataPtr<T> {
+    type Target = T;
+}
+
+impl<T: ?Sized + Pointee> MetadataPtr<T> {
+    /// Builds a pointer with a dangling data address and the given metadata.
+    #[inline]
+    pub(crate) fn new(metadata: <T as Pointee>::Metadata) -> Self {
+        Self {
+            ptr: NonNull::from_raw_parts(NonNull::<()>::dangling(), metadata),
+        }
+    }
+}
+
+/// Reports the concrete [`TypeId`] from pointer metadata alone. Every
+/// `'static` sized type implements it, and a trait object gets it when its
+/// trait has `AnyHaver` as a supertrait.
 ///
 /// # Safety
 /// [`CastMapG`](crate::cast_map::CastMapG)'s checked lookups (`get`,
@@ -35,11 +68,8 @@ use std::ptr::Pointee;
 /// concrete `Self`. A lying implementation makes those lookups unsound.
 pub unsafe trait AnyHaver: 'static {
     /// Returns the [`TypeId`] of the (possibly type-erased) `Self`.
-    ///
-    /// Takes `*const Self` instead of `&self` so it is callable on a null /
-    /// dangling data pointer — the body never reads through the pointer.
     #[inline]
-    fn haver_type_id(self: *const Self) -> TypeId {
+    fn haver_type_id(self: MetadataPtr<Self>) -> TypeId {
         TypeId::of::<Self>()
     }
 }
@@ -51,6 +81,5 @@ unsafe impl<T: 'static> AnyHaver for T {}
 pub fn type_id_from_metadata<T: ?Sized + AnyHaver + Pointee>(
     metadata: <T as Pointee>::Metadata,
 ) -> TypeId {
-    let fat: *const T = std::ptr::from_raw_parts(std::ptr::null::<()>(), metadata);
-    fat.haver_type_id()
+    MetadataPtr::<T>::new(metadata).haver_type_id()
 }

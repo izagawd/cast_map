@@ -1,24 +1,36 @@
 # cast_slotmap
 
-Wrappers over the [`slotmap`](https://crates.io/crates/slotmap) crate's `SlotMap` and `DenseSlotMap`. You store erased values (like `TypeTaggedBox<dyn Any>`) but get **typed** keys back, so `map.get(key)` returns a correctly typed `&T` with no `downcast_ref` at the call site.
+This crate provides maps that store erased values, like `TypeTaggedBox<dyn Any>`, and hand out **typed** keys, so `map.get(key)` returns a `&T` with no `downcast_ref` at the call site.
 
-> **Nightly only.** This crate uses the unstable `ptr_metadata`, `coerce_unsized`, `unsize`, `dispatch_from_dyn`, `arbitrary_self_types`, and `arbitrary_self_types_pointers` features.
+> **Nightly only.** This crate uses the unstable `ptr_metadata`, `derive_coerce_pointee` and `arbitrary_self_types` features. Its `coerce_unsized` feature also turns on the unstable `coerce_unsized` feature.
+
+## Cargo features
+
+None of these is on by default.
+
+* `slotmap` adds the [`slotmap`](https://crates.io/crates/slotmap) crate's `SlotMap` and `DenseSlotMap` as backing maps.
+* `gen_map` adds the [`gen_map`](https://crates.io/crates/gen_map) crate's `GenMap` as a backing map.
+* `coerce_unsized` adds the coercion from `TypeTaggedBox<Dog>` to `TypeTaggedBox<dyn Any>`, and the `insert_sized` and `insert_as` methods.
 
 ## The maps
 
-There are four maps, split along two choices: checked or unchecked lookups, and normal or dense storage.
+* **`CastMapG<M>`** is the safe map, and the recommended one. Each value sits behind a pointer that records its concrete `TypeId`, such as a `TypeTaggedBox`, and every lookup compares that type id with the one the key implies. A key of the wrong type returns `None`.
+* **`UnsafeCastMapG<M>`** is the low level map. Its `get`, `get_mut` and `remove` are `unsafe`, because they trust the metadata that a `CastKey<T, K>` caches. If the value under the key has a different type now, its bytes get read as a `T`, which is undefined behavior and not a `None`.
 
-* **`UnsafeCastMap<K, Ptr>`**: the low level map over `slotmap::SlotMap`. A `CastKey<T>` caches the pointer metadata (for a `dyn` type, its vtable) needed to rebuild a `&T` or `&mut T` from the erased value. The catch: `get`, `get_mut` and `remove` are `unsafe` because they trust that metadata blindly. They never check that the slot still holds the type the key describes. If the slot now holds a different type, its bytes get read as if they were a `T`: wrong vtable, reads past the end of the value, and so on. That is undefined behavior, not a `None`. Only use this map when you can guarantee the key's type still matches the value in its slot.
-* **`CastMap<K, Ptr>`**: the safe map, and the recommended one. Each value lives behind a pointer that also records its concrete `TypeId` (`TypeTaggedBox`, or any stored pointer that implements `ConcreteTypeId`, an `unsafe` trait, since a wrong type id would break the safety of the checked lookups). Every keyed lookup works out the type id the key implies and compares it to the slot's. A key of the wrong type simply returns `None`.
-* **`UnsafeDenseCastMap`** / **`DenseCastMap`**: the same unchecked and checked pair, but over `slotmap::DenseSlotMap`, which stores values next to each other in memory for faster iteration.
+`M` is the backing map, and the features add aliases for their backing maps.
 
-These four are thin **type aliases**. Under the hood there are only two generic types, `UnsafeCastMapG<M>` and `CastMapG<M>`, generic over a backing map `M: SlotMapTrait` (implemented for both `SlotMap` and `DenseSlotMap`).
+| Backing map | Checked | Raw |
+|---|---|---|
+| `slotmap::SlotMap` | `CastMap<K, Ptr>`, `BoxCastMap<K, T>` | `UnsafeCastMap<K, Ptr>`, `UnsafeBoxCastMap<K, T>` |
+| `slotmap::DenseSlotMap` | `DenseCastMap<K, Ptr>`, `BoxDenseCastMap<K, T>` | `UnsafeDenseCastMap<K, Ptr>`, `UnsafeBoxDenseCastMap<K, T>` |
+| `gen_map::GenMap` | `GenCastMap<Ptr, C>`, `BoxGenCastMap<T, C>` | `UnsafeGenCastMap<Ptr, C>`, `UnsafeBoxGenCastMap<T, C>` |
 
-For the common case, use the box aliases. The checked `BoxCastMap<K, T>` and `BoxDenseCastMap<K, T>` store `TypeTaggedBox` (which supplies the type id). The raw `UnsafeBoxCastMap<K, T>` and `UnsafeBoxDenseCastMap<K, T>` store a plain `Box`. (`TypeTaggedBox<T>` is an alias of `TypeTaggedPtr<Box<T>>`, the generic form that pairs any smart pointer, such as `Rc`, `Arc`, `&T` or `&mut T`, with the concrete `TypeId` of the value it points to.)
+The `Box` aliases store a `TypeTaggedBox` in the checked maps and a plain `Box` in the raw ones. `C` is the config of a `GenMap`.
+
+This example needs the `slotmap` and `coerce_unsized` features.
 
 ```rust
-#![feature(ptr_metadata, coerce_unsized, unsize, dispatch_from_dyn,
-           arbitrary_self_types, arbitrary_self_types_pointers)]
+#![feature(ptr_metadata, derive_coerce_pointee, arbitrary_self_types)]
 use cast_slotmap::{BoxCastMap, TypeTaggedBox, CastKey, DefaultKey};
 use std::any::Any;
 
@@ -27,13 +39,31 @@ struct Dog { name: String }
 let mut map: BoxCastMap<DefaultKey, dyn Any> = BoxCastMap::new();
 
 // Insert a concrete type into a `dyn Any` map; the key comes back typed.
-let dog_key: CastKey<Dog> = map.insert_sized(TypeTaggedBox::new(Dog { name: "Rex".into() }));
+let dog_key: CastKey<Dog, DefaultKey> = map.insert_sized(TypeTaggedBox::new(Dog { name: "Rex".into() }));
 assert_eq!(map.get(dog_key).unwrap().name, "Rex");
 
 // Or insert erased and recover the typed key later.
-let dyn_key: CastKey<dyn Any> = map.insert(TypeTaggedBox::new(Dog { name: "Ax".into() }));
-let typed: CastKey<Dog> = map.downcast_key::<Dog>(dyn_key.inner_key()).unwrap();
+let dyn_key: CastKey<dyn Any, DefaultKey> = map.insert(TypeTaggedBox::new(Dog { name: "Ax".into() }));
+let typed: CastKey<Dog, DefaultKey> = map.downcast_key::<Dog>(dyn_key.inner_key()).unwrap();
 ```
+
+Without `coerce_unsized`, coerce the inner pointer and wrap it with `TypeTaggedBox::from_any` instead.
+
+```rust
+let dyn_key = map.insert(TypeTaggedBox::from_any(Box::new(Dog { name: "Rex".into() })));
+let dog_key: CastKey<Dog, DefaultKey> = map.downcast_key(dyn_key.inner_key()).unwrap();
+```
+
+## Backing maps
+
+`Map` is the core of a backing map, and its key can be any `Copy` type. The other traits add capabilities, and a cast map only has the methods whose capability its backing map implements.
+
+* `InsertWithKey` adds the `*_with_key` inserts.
+* `GetDisjointMut` adds the `get_disjoint_*` methods.
+* `Detach` adds detaching and reattaching.
+* `Capacity` adds `capacity`, and `Reserve` adds `with_capacity`, `reserve` and `try_reserve`.
+
+The `slotmap` maps implement all of them. A `GenMap` implements `Reserve` only when its storage can grow.
 
 ## `AnyHaver`: the type check on the key side
 
@@ -47,18 +77,20 @@ trait Component: AnyHaver { /* … */ }   // puts the lookup in dyn Component's 
 
 ## `DynKey`: keys that work with dyn dispatch
 
-A method receiver for dyn dispatch must have exactly the size and shape of a pointer, and `CastKey` cannot promise that. Pointer size depends on the target (32 vs 64 bit) while the key is always 8 bytes, and `slotmap` plans to let users pick the size of their keys, so the key cannot be trusted to fit in, or match, a pointer. Instead, `CastKey::as_dyn` borrows the key as a `DynKey<'_, T>`: a single fat `NonNull`. Its metadata half is the key's vtable. Its address half packs the backing `slotmap` key (its `u64` `as_ffi` form) when `size_of::<u64>() <= size_of::<usize>()`, which is checked per target at compile time. When it does not fit, it points at the borrowed key instead. That makes it a valid **method receiver** for trait objects:
+A dyn dispatch receiver must be the size of a pointer, and a `CastKey`'s backing key can be any size. So `CastKey::as_dyn` borrows the key as a `DynKey<'_, T, K>`, a single fat pointer whose metadata is the key's vtable and whose address points at the backing key. That makes it a valid **method receiver** for trait objects.
 
 ```rust
 trait Component: AnyHaver {
-    fn tick(self: DynKey<'_, Self>, world: &mut World);
+    fn tick(self: DynKey<'_, Self, DefaultKey>, world: &mut World);
 }
 
-let key: CastKey<dyn Component> = component_key.upcast();
+let key: CastKey<dyn Component, DefaultKey> = upcast_key!(component_key);
 key.as_dyn().tick(&mut world);   // virtual call through the key's own vtable
 ```
 
-Inside the method, `self.key()` returns the `CastKey<Self>` to look things up in the map. The dispatch itself never touches the map.
+Inside the method, `self.key()` returns the `CastKey<Self, DefaultKey>` to look things up in the map. The dispatch itself never touches the map.
+
+`upcast_key!` upcasts a key through a `DynKey`. Without a second argument, it upcasts to the type that the surrounding code expects, which here is the type of the `let` binding.
 
 ## License
 
