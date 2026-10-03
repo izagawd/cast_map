@@ -78,6 +78,8 @@ pub mod map;
 pub mod retype_ptr;
 #[cfg(feature = "slotmap")]
 mod slotmap_impl;
+#[cfg(feature = "coerce_unsized")]
+pub mod stable_coerce;
 pub mod type_tagged_ptr;
 pub mod unsafe_cast_map;
 
@@ -104,6 +106,9 @@ pub use dyn_key::DynKey;
 pub use map::{Capacity, Detach, GetDisjointMut, InsertWithKey, Map, Reserve};
 #[doc(inline)]
 pub use retype_ptr::RetypePtr;
+#[cfg(feature = "coerce_unsized")]
+#[doc(inline)]
+pub use stable_coerce::StableCoerce;
 #[doc(no_inline)]
 pub use stable_deref_trait::StableDeref;
 #[doc(inline)]

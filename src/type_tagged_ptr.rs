@@ -19,6 +19,8 @@ use stable_deref_trait::StableDeref;
 
 use crate::any_haver::{type_id_from_metadata, AnyHaver};
 use crate::retype_ptr::RetypePtr;
+#[cfg(feature = "coerce_unsized")]
+use crate::stable_coerce::StableCoerce;
 
 // ─── TypeTaggedPtr ───────────────────────────────────────────────────────────
 
@@ -180,10 +182,11 @@ impl<P: DerefMut> DerefMut for TypeTaggedPtr<P> {
     }
 }
 
-// A `TypeTaggedPtr<P>` coerces to a `TypeTaggedPtr<Q>` whenever `P` coerces to
-// `Q`.
+// A `TypeTaggedPtr<P>` coerces to a `TypeTaggedPtr<Q>` when `P` coerces to `Q`.
+// The `StableCoerce` bound requires `P` to keep pointing at the same value
+// through that coercion, so the recorded type id stays correct.
 #[cfg(feature = "coerce_unsized")]
-impl<P: CoerceUnsized<Q>, Q> CoerceUnsized<TypeTaggedPtr<Q>> for TypeTaggedPtr<P> {}
+impl<P: CoerceUnsized<Q> + StableCoerce, Q> CoerceUnsized<TypeTaggedPtr<Q>> for TypeTaggedPtr<P> {}
 
 unsafe impl<P: StableDeref> StableDeref for TypeTaggedPtr<P> {}
 
