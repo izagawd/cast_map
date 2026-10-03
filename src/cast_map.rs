@@ -500,7 +500,7 @@ where
     {
         let stored = self.inner.inner.get(key.inner_key())?;
         let stored_tid = stored.concrete_type_id();
-        let base: &MTarget<M> = &**stored;
+        let base: &MTarget<M> = stored;
         if stored_tid != type_id_from_metadata::<T>(key.metadata()) {
             return None;
         }
@@ -592,7 +592,7 @@ where
         if stored.concrete_type_id() != type_id_from_metadata::<T>(key.metadata()) {
             return None;
         }
-        let base: &mut MTarget<M> = &mut **stored;
+        let base: &mut MTarget<M> = stored;
         let data: *mut () = (base as *mut MTarget<M>).cast();
         // SAFETY: as in `get`.
         Some(unsafe { &mut *std::ptr::from_raw_parts_mut::<T>(data, key.metadata()) })

@@ -486,7 +486,7 @@ where
         <T as Pointee>::Metadata: Copy,
     {
         let stored = self.inner.get(key.inner_key())?;
-        let base: &MTarget<M> = &**stored;
+        let base: &MTarget<M> = stored;
         let data_ptr: *const () = (base as *const MTarget<M>).cast();
         let typed_ptr: *const T = std::ptr::from_raw_parts(data_ptr, key.metadata());
         Some(&*typed_ptr)
@@ -503,7 +503,7 @@ where
         <T as Pointee>::Metadata: Copy,
     {
         let stored = self.inner.get_unchecked(key.inner_key());
-        let base: &MTarget<M> = &**stored;
+        let base: &MTarget<M> = stored;
         let data_ptr: *const () = (base as *const MTarget<M>).cast();
         let typed_ptr: *const T = std::ptr::from_raw_parts(data_ptr, key.metadata());
         &*typed_ptr
@@ -576,7 +576,7 @@ where
         <T as Pointee>::Metadata: Copy,
     {
         let stored = self.inner.get_mut(key.inner_key())?;
-        let base: &mut MTarget<M> = &mut **stored;
+        let base: &mut MTarget<M> = stored;
         let data_ptr: *mut () = (base as *mut MTarget<M>).cast();
         let typed_ptr: *mut T = std::ptr::from_raw_parts_mut(data_ptr, key.metadata());
         Some(&mut *typed_ptr)
@@ -596,7 +596,7 @@ where
         <T as Pointee>::Metadata: Copy,
     {
         let stored = self.inner.get_unchecked_mut(key.inner_key());
-        let base: &mut MTarget<M> = &mut **stored;
+        let base: &mut MTarget<M> = stored;
         let data_ptr: *mut () = (base as *mut MTarget<M>).cast();
         let typed_ptr: *mut T = std::ptr::from_raw_parts_mut(data_ptr, key.metadata());
         &mut *typed_ptr
@@ -645,7 +645,7 @@ where
         let out = stored.map(|p| {
             let meta = metadata[i];
             i += 1;
-            let base: &mut MTarget<M> = &mut **p;
+            let base: &mut MTarget<M> = p;
             let data_ptr: *mut () = (base as *mut MTarget<M>).cast();
             unsafe { &mut *std::ptr::from_raw_parts_mut(data_ptr, meta) }
         });
@@ -674,7 +674,7 @@ where
         stored.map(|p| {
             let meta = metadata[i];
             i += 1;
-            let base: &mut MTarget<M> = &mut **p;
+            let base: &mut MTarget<M> = p;
             let data_ptr: *mut () = (base as *mut MTarget<M>).cast();
             unsafe { &mut *std::ptr::from_raw_parts_mut(data_ptr, meta) }
         })
@@ -759,7 +759,7 @@ where
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         let (k, p) = self.inner.next()?;
-        let r: &'a MTarget<M> = &**p;
+        let r: &'a MTarget<M> = p;
         Some((to_castable::<M::Key, MTarget<M>>(k, r), r))
     }
 

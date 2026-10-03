@@ -51,7 +51,7 @@ pub struct TypeTaggedPtr<P> {
 /// [`TypeTaggedPtr`] wrapping a [`Box`]: an owning, pointer-stable form
 /// that remembers the concrete [`TypeId`] of the value it was constructed
 /// from.
-pub type TypeTaggedBox<T: ?Sized> = TypeTaggedPtr<Box<T>>;
+pub type TypeTaggedBox<T> = TypeTaggedPtr<Box<T>>;
 
 impl<T: 'static> TypeTaggedPtr<Box<T>> {
     /// Boxes `value`, recording `TypeId::of::<T>()`.
