@@ -47,7 +47,7 @@
 //! This example needs the `slotmap` and `coerce_unsized` features.
 //!
 //! ```ignore
-//! use cast_slotmap::{BoxCastMap, TypeTaggedBox, CastKey, DefaultKey};
+//! use cast_map::{BoxCastMap, TypeTaggedBox, CastKey, DefaultKey};
 //! use std::any::Any;
 //!
 //! struct Dog { name: String }

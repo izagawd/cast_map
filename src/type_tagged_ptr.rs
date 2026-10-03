@@ -123,7 +123,7 @@ where
     ///
     /// ```
     /// use std::any::{Any, TypeId};
-    /// use cast_slotmap::{ConcreteTypeId, TypeTaggedBox};
+    /// use cast_map::{ConcreteTypeId, TypeTaggedBox};
     ///
     /// let tagged: TypeTaggedBox<dyn Any> =
     ///     TypeTaggedBox::from_any(Box::new(5u32));
@@ -146,7 +146,7 @@ where
     ///
     /// ```
     /// use std::any::TypeId;
-    /// use cast_slotmap::{AnyHaver, ConcreteTypeId, TypeTaggedBox};
+    /// use cast_map::{AnyHaver, ConcreteTypeId, TypeTaggedBox};
     ///
     /// trait Pet: AnyHaver {}
     ///

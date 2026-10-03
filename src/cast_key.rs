@@ -149,7 +149,7 @@ where
 /// a type, the key keeps its own.
 ///
 /// ```
-/// use cast_slotmap::{upcast_key, AnyHaver, CastKey};
+/// use cast_map::{upcast_key, AnyHaver, CastKey};
 ///
 /// trait Pet: AnyHaver {}
 ///

@@ -1,4 +1,4 @@
-# cast_slotmap
+# cast_map
 
 This crate provides maps that store erased values, like `TypeTaggedBox<dyn Any>`, and hand out **typed** keys, so `map.get(key)` returns a `&T` with no `downcast_ref` at the call site.
 
@@ -31,7 +31,7 @@ This example needs the `slotmap` and `coerce_unsized` features.
 
 ```rust
 #![feature(ptr_metadata, derive_coerce_pointee, arbitrary_self_types)]
-use cast_slotmap::{BoxCastMap, TypeTaggedBox, CastKey, DefaultKey};
+use cast_map::{BoxCastMap, TypeTaggedBox, CastKey, DefaultKey};
 use std::any::Any;
 
 struct Dog { name: String }
