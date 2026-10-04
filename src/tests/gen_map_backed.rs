@@ -2,9 +2,7 @@
 
 use std::any::Any;
 
-use gen_map::{
-    GenMap, GenMapConfig, GenSlotItem, Key, MapConfig, MapConfigFor, MapKeyConfig, Packed, Split,
-};
+use gen_map::{GenMap, GenMapConfig, GenSlotItem, Key, MapConfig, MapKeyConfig, Packed, Split};
 
 use super::{Cat, Dog};
 use crate::any_haver::AnyHaver;
