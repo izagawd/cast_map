@@ -2,11 +2,10 @@
 //! `gen_map::GenMap`. [`Reserve`] needs a storage that implements
 //! `ReserveStorage`.
 
-use gen_map::{
-    Drain, GenMap, GenMapConfig, InsertWithError, Iter, IterMut, Key, Keys, MapConfigFor,
-    MapKeyConfig, MapSlot, ReserveStorage, StorageError, Values, ValuesMut,
-};
-
+use gen_map::{Drain, GenMap, GenMapConfig, GenSlotItem, InsertWithError, Iter, IterMut, Key, Keys, MapKeyConfig, MapSlot, ReserveStorage, StorageError, Values, ValuesMut};
+use gen_map::Slot;
+use gen_map::KeyConfig;
+use gen_map::MapConfig;
 use crate::map::{Capacity, Detach, GetDisjointMut, InsertWithKey, Map, Reserve};
 
 /// The key a `GenMap<V, C>` hands out.
@@ -14,7 +13,7 @@ type GenKey<C> = Key<MapKeyConfig<C>>;
 
 // SAFETY: a `GenMap` keeps each value in its slot until the value is taken
 // out, and all of its methods agree on which value a key has.
-unsafe impl<V, C> Map for GenMap<V, C> {
+unsafe impl<V, C: GenMapConfig> Map for GenMap<V, C> {
     type Key = GenKey<C>;
     type Value = V;
     type Iter<'a>
@@ -128,7 +127,7 @@ unsafe impl<V, C> Map for GenMap<V, C> {
     }
 }
 
-impl<V, C> InsertWithKey for GenMap<V, C> {
+impl<V, C: GenMapConfig> InsertWithKey for GenMap<V, C> {
     /// Calls `f` with the key that the new value will get, and inserts the
     /// value that `f` returns.
     ///
@@ -148,7 +147,7 @@ impl<V, C> InsertWithKey for GenMap<V, C> {
     }
 }
 
-impl<V, C> GetDisjointMut for GenMap<V, C> {
+impl<V, C: GenMapConfig> GetDisjointMut for GenMap<V, C> {
     #[inline]
     fn get_disjoint_mut<const N: usize>(&mut self, keys: [GenKey<C>; N]) -> Option<[&mut V; N]> {
         self.get_disjoint_mut(keys).ok()
@@ -164,7 +163,7 @@ impl<V, C> GetDisjointMut for GenMap<V, C> {
     }
 }
 
-impl<V, C> Detach for GenMap<V, C> {
+impl<V, C: GenMapConfig> Detach for GenMap<V, C> {
     #[inline]
     fn detach(&mut self, key: GenKey<C>) -> Option<V> {
         self.detach(key)
@@ -175,16 +174,16 @@ impl<V, C> Detach for GenMap<V, C> {
     }
 }
 
-impl<V, C> Capacity for GenMap<V, C> {
+impl<V, C: GenMapConfig> Capacity for GenMap<V, C> {
     #[inline]
     fn capacity(&self) -> usize {
         self.capacity()
     }
 }
 
-impl<V, C> Reserve for GenMap<V, C>
+impl<V, C: GenMapConfig> Reserve for GenMap<V, C>
 where
-    <C as GenMapConfig<MapSlot<V, C>>>::Storage: ReserveStorage,
+     <C as GenMapConfig>::Storage<Slot<<<C as MapConfig>::KeyConfig as KeyConfig>::Gen, V, <<C as MapConfig>::KeyConfig as KeyConfig>::Idx>>: ReserveStorage,
 {
     type ReserveError = StorageError<V, C>;
 
