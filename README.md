@@ -60,7 +60,7 @@ let dog_key: CastKey<Dog, DefaultKey> = map.downcast_key(dyn_key.inner_key()).un
 
 * `InsertWithKey` adds the `*_with_key` inserts.
 * `GetDisjointMut` adds the `get_disjoint_*` methods.
-* `Detach` adds detaching and reattaching.
+* `Detach` adds detaching and attaching.
 * `Capacity` adds `capacity`, and `Reserve` adds `with_capacity`, `reserve` and `try_reserve`.
 
 The `slotmap` maps implement all of them. A `GenMap` implements `Reserve` only when its storage can grow.

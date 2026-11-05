@@ -544,7 +544,7 @@ fn unsafe_map_typed_roundtrip() {
 }
 
 #[test]
-fn unsafe_map_detach_reattach() {
+fn unsafe_map_detach_attach() {
     let mut map: UnsafeBoxCastMap<DefaultKey, dyn Any> = UnsafeBoxCastMap::new();
     let key: CastKey<Dog, DefaultKey> = map.insert_sized(Box::new(Dog { name: "Rex".into() }));
 
@@ -558,24 +558,24 @@ fn unsafe_map_detach_reattach() {
     // Reattach the (mutated) value under the same key; the `Box<Dog>` value
     // unsizes to `Box<dyn Any>` at the call site.
     dog.name = "Max".into();
-    assert!(map.reattach_by_inner_key(key.inner_key(), dog).is_ok());
+    assert!(map.attach_by_inner_key(key.inner_key(), dog).is_ok());
     // SAFETY: a `Dog` is back in the slot, so `key`'s metadata is still correct.
     assert_eq!(unsafe { map.get(key) }.unwrap().name, "Max");
     assert_eq!(map.len(), 1);
 
-    // Backing-key detach/reattach with an already-erased pointer.
+    // Backing-key detach/attach with an already-erased pointer.
     let ik = key.inner_key();
     let erased: Box<dyn Any> = map.detach_by_inner_key(ik).unwrap();
     assert_eq!(erased.downcast_ref::<Dog>().unwrap().name, "Max");
     assert!(map
-        .reattach_by_inner_key(ik, Box::new(Dog { name: "Zed".into() }) as Box<dyn Any>)
+        .attach_by_inner_key(ik, Box::new(Dog { name: "Zed".into() }) as Box<dyn Any>)
         .is_ok());
     // SAFETY: still a `Dog`, so `key`'s metadata remains valid.
     assert_eq!(unsafe { map.get(key) }.unwrap().name, "Zed");
 }
 
 #[test]
-fn checked_map_detach_reattach() {
+fn checked_map_detach_attach() {
     let mut map: AnyMap = AnyMap::new();
     let key: CastKey<Dog, DefaultKey> =
         map.insert_sized(TypeTaggedBox::new(Dog { name: "Rex".into() }));
@@ -590,7 +590,7 @@ fn checked_map_detach_reattach() {
     // Reattach the (mutated) value under the same key; the old typed key
     // resolves again since the types still match.
     dog.name = "Max".into();
-    assert!(map.reattach_by_inner_key(key.inner_key(), dog).is_ok());
+    assert!(map.attach_by_inner_key(key.inner_key(), dog).is_ok());
     assert_eq!(map.get(key).unwrap().name, "Max");
     assert_eq!(map.len(), 1);
 
@@ -600,7 +600,7 @@ fn checked_map_detach_reattach() {
     let erased: TypeTaggedBox<dyn Any> = map.detach_by_inner_key(ik).unwrap();
     assert_eq!(erased.downcast_ref::<Dog>().unwrap().name, "Max");
     assert!(map
-        .reattach_by_inner_key(ik, TypeTaggedBox::new(Cat { lives: 9 }))
+        .attach_by_inner_key(ik, TypeTaggedBox::new(Cat { lives: 9 }))
         .is_ok());
     assert!(map.get(key).is_none());
     let cat_key = map.downcast_key::<Cat>(ik).unwrap();

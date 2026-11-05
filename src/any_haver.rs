@@ -9,8 +9,9 @@
 //! rather than a silent miss; use `downcast_key` / `get_by_inner_key` for
 //! erased access.
 //!
-//! The method takes a [`MetadataPtr`], which carries only pointer metadata, so
-//! [`type_id_from_metadata`] can call it without a value.
+//! The method takes a [`DynKey`] whose backing key is `()`. That key holds no
+//! data, so [`type_id_from_metadata`] can build the `DynKey` from pointer
+//! metadata alone and call the method without a value.
 //!
 //! Dispatch summary for `type_id_from_metadata::<T>(meta)`:
 //! - `T` sized          → `TypeId::of::<T>()`              (static, metadata is `()`)
@@ -19,43 +20,9 @@
 //!   `dyn Foo`'s vtable (supertrait methods live in the vtable).
 
 use std::any::TypeId;
-use std::marker::CoercePointee;
-use std::ops::Receiver;
-use std::ptr::{NonNull, Pointee};
+use std::ptr::Pointee;
 
-/// A pointer that carries only the pointer metadata of a `T` and points at no
-/// value. It is the receiver of [`AnyHaver::haver_type_id`].
-// `CoercePointee` gives `MetadataPtr` the unsizing coercions and the dyn
-// dispatch of a pointer.
-#[derive(CoercePointee)]
-#[repr(transparent)]
-pub struct MetadataPtr<#[pointee] T: ?Sized> {
-    ptr: NonNull<T>,
-}
-
-impl<T: ?Sized> Clone for MetadataPtr<T> {
-    #[inline]
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-
-impl<T: ?Sized> Copy for MetadataPtr<T> {}
-
-// `MetadataPtr` is a receiver without `Deref`, because no value sits behind it.
-impl<T: ?Sized> Receiver for MetadataPtr<T> {
-    type Target = T;
-}
-
-impl<T: ?Sized + Pointee> MetadataPtr<T> {
-    /// Builds a pointer with a dangling data address and the given metadata.
-    #[inline]
-    pub(crate) fn new(metadata: <T as Pointee>::Metadata) -> Self {
-        Self {
-            ptr: NonNull::from_raw_parts(NonNull::<()>::dangling(), metadata),
-        }
-    }
-}
+use crate::dyn_key::DynKey;
 
 /// Reports the concrete [`TypeId`] from pointer metadata alone. Every
 /// `'static` sized type implements it, and a trait object gets it when its
@@ -69,7 +36,7 @@ impl<T: ?Sized + Pointee> MetadataPtr<T> {
 pub unsafe trait AnyHaver: 'static {
     /// Returns the [`TypeId`] of the (possibly type-erased) `Self`.
     #[inline]
-    fn haver_type_id(self: MetadataPtr<Self>) -> TypeId {
+    fn haver_type_id(self: DynKey<'_, Self, ()>) -> TypeId {
         TypeId::of::<Self>()
     }
 }
@@ -81,5 +48,5 @@ unsafe impl<T: 'static> AnyHaver for T {}
 pub fn type_id_from_metadata<T: ?Sized + AnyHaver + Pointee>(
     metadata: <T as Pointee>::Metadata,
 ) -> TypeId {
-    MetadataPtr::<T>::new(metadata).haver_type_id()
+    DynKey::<T, ()>::from_metadata(metadata).haver_type_id()
 }

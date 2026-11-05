@@ -169,8 +169,8 @@ impl<V, C: GenMapConfig> Detach for GenMap<V, C> {
         self.detach(key)
     }
     #[inline]
-    fn reattach(&mut self, key: GenKey<C>, value: V) -> Result<(), V> {
-        self.reattach(key, value)
+    fn attach(&mut self, key: GenKey<C>, value: V) -> Result<(), V> {
+        self.attach(key, value)
     }
 }
 

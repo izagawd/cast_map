@@ -681,7 +681,7 @@ where
     }
 }
 
-// ─── detach / reattach (backing key) ────────────────────────────
+// ─── detach / attach (backing key) ────────────────────────────
 
 impl<M> UnsafeCastMapG<M>
 where
@@ -689,7 +689,7 @@ where
     M::Value: StableDeref,
 {
     /// Removes and returns the value under a backing key, and keeps the key
-    /// reserved for [`reattach_by_inner_key`](Self::reattach_by_inner_key).
+    /// reserved for [`attach_by_inner_key`](Self::attach_by_inner_key).
     #[inline]
     pub fn detach_by_inner_key(&mut self, key: M::Key) -> Option<M::Value> {
         self.inner.detach(key)
@@ -701,8 +701,8 @@ where
     /// Hands `value` back if `key` is not detached. The `slotmap` maps panic
     /// instead.
     #[inline]
-    pub fn reattach_by_inner_key(&mut self, key: M::Key, value: M::Value) -> Result<(), M::Value> {
-        self.inner.reattach(key, value)
+    pub fn attach_by_inner_key(&mut self, key: M::Key, value: M::Value) -> Result<(), M::Value> {
+        self.inner.attach(key, value)
     }
 }
 
@@ -718,7 +718,7 @@ where
     /// Detaches an element by its [`CastKey`], returning the owned smart pointer
     /// re-typed to `T` (so a `Box<dyn Any>` map hands back a `Box<T>`). Unlike
     /// [`remove`](Self::remove) the slot stays reservable: the same key can be
-    /// reused with [`reattach_by_inner_key`](Self::reattach_by_inner_key).
+    /// reused with [`attach_by_inner_key`](Self::attach_by_inner_key).
     ///
     /// # Safety
     /// The key's pointer metadata must be valid for the data stored at that slot.

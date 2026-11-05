@@ -115,7 +115,7 @@ fn remove_makes_the_key_stale() {
 }
 
 #[test]
-fn detach_and_reattach() {
+fn detach_and_attach() {
     let mut map = AnyMap::new();
     let key: CastKey<Dog, Key> = map.insert_sized(TypeTaggedBox::new(Dog { name: "Rex".into() }));
 
@@ -128,12 +128,12 @@ fn detach_and_reattach() {
     assert_ne!(other.inner_key().idx(), key.inner_key().idx());
 
     dog.name = "Max".into();
-    assert!(map.reattach_by_inner_key(key.inner_key(), dog).is_ok());
+    assert!(map.attach_by_inner_key(key.inner_key(), dog).is_ok());
     assert_eq!(map.get(key).unwrap().name, "Max");
 
     // `GenMap` hands the value back for a key that is not detached.
     let refused =
-        map.reattach_by_inner_key(other.inner_key(), TypeTaggedBox::new(Cat { lives: 7 }));
+        map.attach_by_inner_key(other.inner_key(), TypeTaggedBox::new(Cat { lives: 7 }));
     assert_eq!(
         refused.err().unwrap().downcast_ref::<Cat>(),
         Some(&Cat { lives: 7 })
@@ -144,7 +144,7 @@ fn detach_and_reattach() {
     let erased: TypeTaggedBox<dyn Any> = map.detach_by_inner_key(key.inner_key()).unwrap();
     assert!(erased.is::<Dog>());
     assert!(map
-        .reattach_by_inner_key(key.inner_key(), TypeTaggedBox::new(Cat { lives: 9 }))
+        .attach_by_inner_key(key.inner_key(), TypeTaggedBox::new(Cat { lives: 9 }))
         .is_ok());
     assert!(map.get(key).is_none());
     let cat: CastKey<Cat, Key> = map.downcast_key(key.inner_key()).unwrap();

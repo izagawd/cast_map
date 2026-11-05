@@ -94,6 +94,18 @@ where
     }
 }
 
+impl<T: ?Sized + Pointee> DynKey<'static, T, ()> {
+    /// Builds a `DynKey` that carries only `metadata`. Its address is dangling,
+    /// which is valid because reading a `()` touches no memory.
+    #[inline]
+    pub(crate) fn from_metadata(metadata: <T as Pointee>::Metadata) -> Self {
+        Self {
+            ptr: NonNull::from_raw_parts(NonNull::<()>::dangling(), metadata),
+            _borrow: PhantomData,
+        }
+    }
+}
+
 impl<'a, T: ?Sized + AnyHaver + Pointee, K: Copy> DynKey<'a, T, K>
 where
     <T as Pointee>::Metadata: Copy,

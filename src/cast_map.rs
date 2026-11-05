@@ -197,7 +197,7 @@ where
     }
 
     /// Removes and returns the value under a backing key, and keeps the key
-    /// reserved for [`reattach_by_inner_key`](Self::reattach_by_inner_key).
+    /// reserved for [`attach_by_inner_key`](Self::attach_by_inner_key).
     #[inline]
     pub fn detach_by_inner_key(&mut self, key: M::Key) -> Option<M::Value>
     where
@@ -212,11 +212,11 @@ where
     /// Hands `value` back if `key` is not detached. The `slotmap` maps panic
     /// instead.
     #[inline]
-    pub fn reattach_by_inner_key(&mut self, key: M::Key, value: M::Value) -> Result<(), M::Value>
+    pub fn attach_by_inner_key(&mut self, key: M::Key, value: M::Value) -> Result<(), M::Value>
     where
         M: Detach,
     {
-        self.inner.reattach_by_inner_key(key, value)
+        self.inner.attach_by_inner_key(key, value)
     }
 
     /// Shared iterator over output references only.
@@ -546,7 +546,7 @@ where
     /// Detaches an element by its [`CastKey`], returning the owned smart
     /// pointer re-typed to `T`. Unlike [`remove`](Self::remove) the slot stays
     /// reservable: the same key can be reused with
-    /// [`reattach_by_inner_key`](Self::reattach_by_inner_key). Returns
+    /// [`attach_by_inner_key`](Self::attach_by_inner_key). Returns
     /// `None`, and detaches nothing, if the key is stale or its type does not
     /// match the slot.
     #[inline]

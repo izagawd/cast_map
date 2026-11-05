@@ -4,7 +4,7 @@
 //!
 //! - [`InsertWithKey`] adds the `*_with_key` inserts.
 //! - [`GetDisjointMut`] adds the `get_disjoint_*` methods.
-//! - [`Detach`] adds detaching and reattaching.
+//! - [`Detach`] adds detaching and attaching.
 //! - [`Capacity`] adds `capacity`.
 //! - [`Reserve`] adds `with_capacity`, `reserve` and `try_reserve`.
 //! - `IntoIterator` adds `into_iter` to an owned cast map.
@@ -30,7 +30,7 @@ pub(crate) type MTarget<M> = <<M as Map>::Value as Deref>::Target;
 /// - A value stays under the key it was inserted with until a method takes it
 ///   out, and no method moves it to another key or replaces it.
 /// - `insert` returns the key of the new value, `try_insert_with_key` passes
-///   its closure the key that it returns, and a successful `reattach` puts the
+///   its closure the key that it returns, and a successful `attach` puts the
 ///   value under the key it was given.
 /// - The lookups, `remove` and `detach` find the same value for the same key.
 /// - The iterators, `retain` and `IntoIterator` pair each value with its key.
@@ -201,10 +201,10 @@ pub trait GetDisjointMut: Map {
 }
 
 /// A backing map that can take a value out while it keeps the value's key
-/// reserved for [`reattach`](Self::reattach).
+/// reserved for [`attach`](Self::attach).
 pub trait Detach: Map {
     /// Removes and returns the value under `key`, and keeps `key` reserved
-    /// until [`reattach`](Self::reattach) puts a value back under it.
+    /// until [`attach`](Self::attach) puts a value back under it.
     fn detach(&mut self, key: Self::Key) -> Option<Self::Value>;
 
     /// Puts `value` back under a key whose value [`detach`](Self::detach) took
@@ -214,7 +214,7 @@ pub trait Detach: Map {
     ///
     /// Hands `value` back if `key` is not detached. A map that cannot tell may
     /// panic instead, as the `slotmap` maps do.
-    fn reattach(&mut self, key: Self::Key, value: Self::Value) -> Result<(), Self::Value>;
+    fn attach(&mut self, key: Self::Key, value: Self::Value) -> Result<(), Self::Value>;
 }
 
 /// A backing map that reports its capacity.

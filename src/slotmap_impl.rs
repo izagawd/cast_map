@@ -155,8 +155,8 @@ impl<K: Key, V> Detach for SlotMap<K, V> {
     ///
     /// Panics if `key` is not detached, because a `SlotMap` cannot report it.
     #[inline]
-    fn reattach(&mut self, key: K, value: V) -> Result<(), V> {
-        self.reattach(key, value);
+    fn attach(&mut self, key: K, value: V) -> Result<(), V> {
+        self.attach(key, value);
         Ok(())
     }
 }
@@ -334,8 +334,8 @@ impl<K: Key, V> Detach for DenseSlotMap<K, V> {
     /// Panics if `key` is not detached, because a `DenseSlotMap` cannot report
     /// it, or if the map is full.
     #[inline]
-    fn reattach(&mut self, key: K, value: V) -> Result<(), V> {
-        self.reattach(key, value);
+    fn attach(&mut self, key: K, value: V) -> Result<(), V> {
+        self.attach(key, value);
         Ok(())
     }
 }

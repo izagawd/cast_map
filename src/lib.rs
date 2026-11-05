@@ -89,7 +89,7 @@ pub mod unsafe_cast_map;
 pub use slotmap::{new_key_type, DefaultKey, Key, KeyData};
 
 #[doc(inline)]
-pub use any_haver::{type_id_from_metadata, AnyHaver, MetadataPtr};
+pub use any_haver::{type_id_from_metadata, AnyHaver};
 #[doc(inline)]
 pub use cast_key::CastKey;
 #[doc(inline)]
