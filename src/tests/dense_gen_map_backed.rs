@@ -4,7 +4,7 @@
 
 use std::any::Any;
 
-use gen_map::Key;
+use gen_map::{DenseGenMap, Key};
 
 use super::{Cat, Dog};
 use crate::cast_key::CastKey;
@@ -154,4 +154,21 @@ fn unsafe_map_round_trip() {
     let removed: Box<Dog> = unsafe { map.remove(key) }.unwrap();
     assert_eq!(removed.name, "U");
     assert!(map.is_empty());
+}
+
+#[test]
+fn converts_to_and_from_the_backing_map() {
+    let mut map = AnyMap::new();
+    let dog = insert_typed(&mut map, Dog { name: "Rex".into() });
+
+    // The values stay in place, so the keys of the cast map still work after
+    // the round trip.
+    let backing: DenseGenMap<TypeTaggedBox<dyn Any>> = map.into();
+    assert_eq!(backing.len(), 1);
+    let map = AnyMap::from(backing);
+    assert_eq!(map.get(dog).unwrap().name, "Rex");
+
+    let unsafe_map = UnsafeBoxDenseGenCastMap::<dyn Any>::from(DenseGenMap::new());
+    let backing: DenseGenMap<Box<dyn Any>> = unsafe_map.into();
+    assert!(backing.is_empty());
 }

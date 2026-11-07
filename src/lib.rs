@@ -104,8 +104,8 @@ pub use cast_map::{BoxDenseSlotCastMap, BoxSlotCastMap, DenseSlotCastMap, SlotCa
 pub use dyn_key::DynKey;
 #[doc(inline)]
 pub use map::{
-    Capacity, Clear, Detach, Drain, GetDisjointMut, InsertWithKey, Iterate, IterateKeys,
-    IterateValues, Map, Remove, Reserve, Retain,
+    Capacity, Clear, Detach, Drain, Empty, GetDisjointMut, InsertWithKey, Iterate, IterateKeys,
+    IterateValues, Len, Map, Remove, Reserve, Retain, WithCapacity,
 };
 #[doc(inline)]
 pub use retype_ptr::RetypePtr;

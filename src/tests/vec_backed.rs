@@ -1,6 +1,7 @@
 //! Tests for backing maps that wrap a `Vec` and use `usize` keys. `VecMap`
-//! implements [`Map`], `IntoIterator` and the capability traits for removing
-//! and iterating. `PushOnlyMap` implements only [`Map`].
+//! implements [`Map`], [`Empty`], [`Len`], `IntoIterator` and the capability
+//! traits for removing and iterating. `PushOnlyMap` implements only [`Map`], so
+//! its cast map is made with `From`.
 
 use std::any::Any;
 
@@ -9,7 +10,9 @@ use crate::any_haver::AnyHaver;
 use crate::cast_key::CastKey;
 use crate::cast_map::CastMap;
 use crate::dyn_key::DynKey;
-use crate::map::{Clear, Drain, Iterate, IterateKeys, IterateValues, Map, Remove, Retain};
+use crate::map::{
+    Clear, Drain, Empty, Iterate, IterateKeys, IterateValues, Len, Map, Remove, Retain,
+};
 use crate::type_tagged_ptr::TypeTaggedBox;
 use crate::unsafe_cast_map::UnsafeCastMap;
 use crate::upcast_key;
@@ -27,15 +30,6 @@ unsafe impl<V: 'static> Map for VecMap<V> {
     type Key = usize;
     type Value = V;
 
-    fn empty() -> Self {
-        Self {
-            slots: Vec::new(),
-            len: 0,
-        }
-    }
-    fn len(&self) -> usize {
-        self.len
-    }
     fn get(&self, key: usize) -> Option<&V> {
         self.slots.get(key)?.as_ref()
     }
@@ -46,6 +40,21 @@ unsafe impl<V: 'static> Map for VecMap<V> {
         self.slots.push(Some(value));
         self.len += 1;
         self.slots.len() - 1
+    }
+}
+
+impl<V: 'static> Empty for VecMap<V> {
+    fn empty() -> Self {
+        Self {
+            slots: Vec::new(),
+            len: 0,
+        }
+    }
+}
+
+impl<V: 'static> Len for VecMap<V> {
+    fn len(&self) -> usize {
+        self.len
     }
 }
 
@@ -185,12 +194,6 @@ unsafe impl<V> Map for PushOnlyMap<V> {
     type Key = usize;
     type Value = V;
 
-    fn empty() -> Self {
-        Self { values: Vec::new() }
-    }
-    fn len(&self) -> usize {
-        self.values.len()
-    }
     fn get(&self, key: usize) -> Option<&V> {
         self.values.get(key)
     }
@@ -229,7 +232,7 @@ impl Speak for Cat {
 
 #[test]
 fn backing_keys_match_iter() {
-    fn check<M: Map<Value = u32> + Remove + IterateKeys + Iterate>()
+    fn check<M: Map<Value = u32> + Empty + Remove + IterateKeys + Iterate>()
     where
         M::Key: PartialEq + std::fmt::Debug,
     {
@@ -258,7 +261,7 @@ fn backing_keys_match_iter() {
 fn cast_keys_match_iter() {
     fn check<M>()
     where
-        M: Map<Value = TypeTaggedBox<dyn Any>> + Remove + IterateKeys + Iterate,
+        M: Map<Value = TypeTaggedBox<dyn Any>> + Empty + Remove + IterateKeys + Iterate,
         M::Key: PartialEq + std::fmt::Debug,
     {
         let mut map: CastMap<M> = CastMap::new();
@@ -290,12 +293,12 @@ fn cast_keys_match_iter() {
 
 #[test]
 fn cast_map_works_on_core_trait_alone() {
-    let mut map: CastMap<PushOnlyMap<TypeTaggedBox<dyn Any>>> = CastMap::new();
+    let backing: PushOnlyMap<TypeTaggedBox<dyn Any>> = PushOnlyMap { values: Vec::new() };
+    let mut map = CastMap::from(backing);
     let erased = map.insert(TypeTaggedBox::from_any(Box::new(Dog {
         name: "Rex".into(),
     })));
     let dog: CastKey<Dog, usize> = map.downcast_key(erased.inner_key()).unwrap();
-    assert_eq!(map.len(), 1);
 
     map.get_mut(dog).unwrap().name.push('!');
     assert_eq!(map[dog].name, "Rex!");

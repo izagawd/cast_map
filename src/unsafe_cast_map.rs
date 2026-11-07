@@ -5,7 +5,7 @@
 //! instead.
 //!
 //! The map is generic over its backing map `M`, and every method forwards to
-//! `M` through [`Map`] or a capability trait from [`map`](crate::map).
+//! `M` through [`Map`] or a capability trait from [`map`].
 
 #[cfg(feature = "coerce_unsized")]
 use std::ops::Deref;
@@ -19,8 +19,8 @@ use slotmap::{DenseSlotMap, SlotMap};
 
 use crate::cast_key::CastKey;
 use crate::map::{
-    self, Capacity, Clear, Detach, GetDisjointMut, InsertWithKey, Iterate, IterateKeys,
-    IterateValues, MTarget, Map, Remove, Reserve, Retain,
+    self, Capacity, Clear, Detach, Empty, GetDisjointMut, InsertWithKey, Iterate, IterateKeys,
+    IterateValues, Len, MTarget, Map, Remove, Reserve, Retain, WithCapacity,
 };
 use crate::retype_ptr::RetypePtr;
 use stable_deref_trait::StableDeref;
@@ -69,12 +69,20 @@ where
 
 impl<M> Default for UnsafeCastMap<M>
 where
-    M: Map,
+    M: Empty,
     M::Value: StableDeref,
 {
     #[inline]
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl<M: Map> From<M> for UnsafeCastMap<M> {
+    /// Wraps `map` in a cast map.
+    #[inline]
+    fn from(map: M) -> Self {
+        Self { inner: map }
     }
 }
 
@@ -87,7 +95,10 @@ where
 {
     /// Creates a new, empty map.
     #[inline]
-    pub fn new() -> Self {
+    pub fn new() -> Self
+    where
+        M: Empty,
+    {
         Self { inner: M::empty() }
     }
 
@@ -128,7 +139,7 @@ where
     #[inline]
     pub fn with_capacity(capacity: usize) -> Self
     where
-        M: Reserve,
+        M: WithCapacity,
     {
         Self {
             inner: M::with_capacity(capacity),
@@ -137,13 +148,19 @@ where
 
     /// Returns true if the map is empty.
     #[inline]
-    pub fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool
+    where
+        M: Len,
+    {
         self.inner.is_empty()
     }
 
     /// Returns the number of occupied elements.
     #[inline]
-    pub fn len(&self) -> usize {
+    pub fn len(&self) -> usize
+    where
+        M: Len,
+    {
         self.inner.len()
     }
 

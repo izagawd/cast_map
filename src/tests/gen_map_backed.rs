@@ -2,7 +2,9 @@
 
 use std::any::Any;
 
-use gen_map::{GenMap, GenMapConfig, GenSlotItem, Key, MapConfig, MapKeyConfig, Packed, Split};
+use gen_map::{
+    GenMap, GenMapConfig, GenSlotItem, KeepLen, Key, MapConfig, MapKeyConfig, Packed, Split,
+};
 
 use super::{Cat, Dog};
 use crate::any_haver::AnyHaver;
@@ -23,8 +25,9 @@ impl MapConfig for Compact {
     type KeyConfig = Packed<u32, 8>;
 }
 
-impl<S: GenSlotItem> GenMapConfig<S> for Compact {
-    type Storage = Vec<S>;
+impl GenMapConfig for Compact {
+    type Len = KeepLen;
+    type Storage<S: GenSlotItem> = Vec<S>;
 }
 
 /// Maps with this config hand out sixteen byte keys.
@@ -34,8 +37,9 @@ impl MapConfig for Wide {
     type KeyConfig = Split<u64, u64>;
 }
 
-impl<S: GenSlotItem> GenMapConfig<S> for Wide {
-    type Storage = Vec<S>;
+impl GenMapConfig for Wide {
+    type Len = KeepLen;
+    type Storage<S: GenSlotItem> = Vec<S>;
 }
 
 /// Maps with this config keep their slots in an `ArrayVec`, which has room for
@@ -46,8 +50,9 @@ impl MapConfig for Four {
     type KeyConfig = Split<u8, u8>;
 }
 
-impl<S: GenSlotItem> GenMapConfig<S> for Four {
-    type Storage = arrayvec::ArrayVec<S, 4>;
+impl GenMapConfig for Four {
+    type Len = KeepLen;
+    type Storage<S: GenSlotItem> = arrayvec::ArrayVec<S, 4>;
 }
 
 trait Pet: AnyHaver + Any {
@@ -132,8 +137,7 @@ fn detach_and_attach() {
     assert_eq!(map.get(key).unwrap().name, "Max");
 
     // `GenMap` hands the value back for a key that is not detached.
-    let refused =
-        map.attach_by_inner_key(other.inner_key(), TypeTaggedBox::new(Cat { lives: 7 }));
+    let refused = map.attach_by_inner_key(other.inner_key(), TypeTaggedBox::new(Cat { lives: 7 }));
     assert_eq!(
         refused.err().unwrap().downcast_ref::<Cat>(),
         Some(&Cat { lives: 7 })
@@ -235,11 +239,10 @@ fn iterators_retain_drain_and_into_iter() {
     assert_eq!(lives, [4]);
 }
 
-/// Checks that `DynKey` gets the same key back for a map with config `C`,
+/// Checks that `DynKey` gets the same key back for `map`, whose config is `C`,
 /// directly and after an unsizing coercion.
-fn check_dyn_keys<C: MapConfigFor<TypeTaggedBox<dyn Any>>>() {
+fn check_dyn_keys<C: GenMapConfig>(mut map: CastMap<GenMap<TypeTaggedBox<dyn Any>, C>>) {
     type K<C> = Key<MapKeyConfig<C>>;
-    let mut map: CastMap<GenMap<TypeTaggedBox<dyn Any>, C>> = CastMap::new();
     let dog: CastKey<Dog, K<C>> = map.insert_sized(TypeTaggedBox::new(Dog { name: "Rex".into() }));
     let cat: CastKey<Cat, K<C>> = map.insert_sized(TypeTaggedBox::new(Cat { lives: 9 }));
     map.remove(dog);
@@ -257,9 +260,9 @@ fn dyn_keys_work_for_every_key_size() {
     assert_eq!(std::mem::size_of::<Key<MapKeyConfig<Compact>>>(), 4);
     assert_eq!(std::mem::size_of::<Key>(), 8);
     assert_eq!(std::mem::size_of::<Key<MapKeyConfig<Wide>>>(), 16);
-    check_dyn_keys::<Compact>();
-    check_dyn_keys::<gen_map::DefaultMapConfig>();
-    check_dyn_keys::<Wide>();
+    check_dyn_keys::<Compact>(CastMap::new());
+    check_dyn_keys::<gen_map::DefaultMapConfig>(CastMap::new());
+    check_dyn_keys::<Wide>(CastMap::new());
 }
 
 #[test]
@@ -345,4 +348,21 @@ fn clone_keeps_keys_working() {
     let clone = map.clone();
     // SAFETY: the clone keeps the same `u32` under `key`.
     assert_eq!(unsafe { clone.get(key) }, Some(&7));
+}
+
+#[test]
+fn converts_to_and_from_the_backing_map() {
+    let mut map = AnyMap::new();
+    let dog: CastKey<Dog, Key> = map.insert_sized(TypeTaggedBox::new(Dog { name: "Rex".into() }));
+
+    // The values stay in place, so the keys of the cast map still work after
+    // the round trip.
+    let backing: GenMap<TypeTaggedBox<dyn Any>> = map.into();
+    assert_eq!(backing.len(), 1);
+    let map = AnyMap::from(backing);
+    assert_eq!(map.get(dog).unwrap().name, "Rex");
+
+    let unsafe_map = UnsafeBoxGenCastMap::<dyn Any>::from(GenMap::new());
+    let backing: GenMap<Box<dyn Any>> = unsafe_map.into();
+    assert!(backing.is_empty());
 }

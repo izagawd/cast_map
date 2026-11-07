@@ -42,8 +42,8 @@ use stable_deref_trait::StableDeref;
 use crate::any_haver::{type_id_from_metadata, AnyHaver};
 use crate::cast_key::CastKey;
 use crate::map::{
-    self, Capacity, Clear, Detach, GetDisjointMut, InsertWithKey, Iterate, IterateKeys,
-    IterateValues, MTarget, Map, Remove, Reserve, Retain,
+    self, Capacity, Clear, Detach, Empty, GetDisjointMut, InsertWithKey, Iterate, IterateKeys,
+    IterateValues, Len, MTarget, Map, Remove, Reserve, Retain, WithCapacity,
 };
 use crate::retype_ptr::RetypePtr;
 use crate::type_tagged_ptr::ConcreteTypeId;
@@ -59,7 +59,7 @@ use crate::unsafe_cast_map::{self, UnsafeCastMap};
 /// `M` is the backing map, and its values are smart pointers such as
 /// `TypeTaggedBox<dyn Any>`.
 pub struct CastMap<M> {
-    inner: UnsafeCastMap<M>,
+    pub(crate) inner: UnsafeCastMap<M>,
 }
 
 // ─── Clone ───────────────────────────────────────────────────────────────────
@@ -85,12 +85,22 @@ where
 
 impl<M> Default for CastMap<M>
 where
-    M: Map,
+    M: Empty,
     M::Value: StableDeref,
 {
     #[inline]
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl<M: Map> From<M> for CastMap<M> {
+    /// Wraps `map` in a cast map.
+    #[inline]
+    fn from(map: M) -> Self {
+        Self {
+            inner: UnsafeCastMap::from(map),
+        }
     }
 }
 
@@ -103,7 +113,10 @@ where
 {
     /// Creates a new, empty map.
     #[inline]
-    pub fn new() -> Self {
+    pub fn new() -> Self
+    where
+        M: Empty,
+    {
         Self {
             inner: UnsafeCastMap::new(),
         }
@@ -113,7 +126,7 @@ where
     #[inline]
     pub fn with_capacity(capacity: usize) -> Self
     where
-        M: Reserve,
+        M: WithCapacity,
     {
         Self {
             inner: UnsafeCastMap::with_capacity(capacity),
@@ -122,13 +135,19 @@ where
 
     /// Returns true if the map is empty.
     #[inline]
-    pub fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool
+    where
+        M: Len,
+    {
         self.inner.is_empty()
     }
 
     /// Returns the number of occupied elements.
     #[inline]
-    pub fn len(&self) -> usize {
+    pub fn len(&self) -> usize
+    where
+        M: Len,
+    {
         self.inner.len()
     }
 

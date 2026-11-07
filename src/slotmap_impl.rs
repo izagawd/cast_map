@@ -5,10 +5,12 @@ use std::collections::TryReserveError;
 
 use slotmap::{DenseSlotMap, Key, SlotMap};
 
+use crate::cast_map::CastMap;
 use crate::map::{
-    Capacity, Clear, Detach, Drain, GetDisjointMut, InsertWithKey, Iterate, IterateKeys,
-    IterateValues, Map, Remove, Reserve, Retain,
+    Capacity, Clear, Detach, Drain, Empty, GetDisjointMut, InsertWithKey, Iterate, IterateKeys,
+    IterateValues, Len, Map, Remove, Reserve, Retain, WithCapacity,
 };
+use crate::unsafe_cast_map::UnsafeCastMap;
 
 // ─── SlotMap ─────────────────────────────────────────────────────────────────
 
@@ -19,63 +21,69 @@ unsafe impl<K: Key, V> Map for SlotMap<K, V> {
     type Value = V;
 
     #[inline]
-    fn empty() -> Self {
-        SlotMap::with_key()
-    }
-    #[inline]
-    fn len(&self) -> usize {
-        self.len()
-    }
-    #[inline]
-    fn is_empty(&self) -> bool {
-        self.is_empty()
-    }
-    #[inline]
     fn contains_key(&self, key: K) -> bool {
-        self.contains_key(key)
+        SlotMap::contains_key(self, key)
     }
     #[inline]
     fn get(&self, key: K) -> Option<&V> {
-        self.get(key)
+        SlotMap::get(self, key)
     }
     #[inline]
     unsafe fn get_unchecked(&self, key: K) -> &V {
         // SAFETY: the caller promises that a value is under `key`.
-        unsafe { self.get_unchecked(key) }
+        unsafe { SlotMap::get_unchecked(self, key) }
     }
     #[inline]
     fn get_mut(&mut self, key: K) -> Option<&mut V> {
-        self.get_mut(key)
+        SlotMap::get_mut(self, key)
     }
     #[inline]
     unsafe fn get_unchecked_mut(&mut self, key: K) -> &mut V {
         // SAFETY: the caller promises that a value is under `key`.
-        unsafe { self.get_unchecked_mut(key) }
+        unsafe { SlotMap::get_unchecked_mut(self, key) }
     }
     #[inline]
     fn insert(&mut self, value: V) -> K {
-        self.insert(value)
+        SlotMap::insert(self, value)
+    }
+}
+
+impl<K: Key, V> Empty for SlotMap<K, V> {
+    #[inline]
+    fn empty() -> Self {
+        SlotMap::with_key()
+    }
+}
+
+impl<K: Key, V> Len for SlotMap<K, V> {
+    #[inline]
+    fn len(&self) -> usize {
+        SlotMap::len(self)
+    }
+    #[inline]
+    fn is_empty(&self) -> bool {
+        SlotMap::is_empty(self)
     }
 }
 
 impl<K: Key, V> Remove for SlotMap<K, V> {
     #[inline]
     fn remove(&mut self, key: K) -> Option<V> {
-        self.remove(key)
+        SlotMap::remove(self, key)
     }
 }
 
 impl<K: Key, V> Clear for SlotMap<K, V> {
     #[inline]
     fn clear(&mut self) {
-        self.clear();
+        SlotMap::clear(self);
     }
 }
 
 impl<K: Key, V> Retain for SlotMap<K, V> {
     #[inline]
     fn retain<F: FnMut(K, &mut V) -> bool>(&mut self, f: F) {
-        self.retain(f);
+        SlotMap::retain(self, f);
     }
 }
 
@@ -88,7 +96,7 @@ impl<K: Key, V> IterateKeys for SlotMap<K, V> {
 
     #[inline]
     fn keys(&self) -> Self::Keys<'_> {
-        self.keys()
+        SlotMap::keys(self)
     }
 }
 
@@ -106,11 +114,11 @@ impl<K: Key, V> IterateValues for SlotMap<K, V> {
 
     #[inline]
     fn values(&self) -> Self::Values<'_> {
-        self.values()
+        SlotMap::values(self)
     }
     #[inline]
     fn values_mut(&mut self) -> Self::ValuesMut<'_> {
-        self.values_mut()
+        SlotMap::values_mut(self)
     }
 }
 
@@ -128,11 +136,11 @@ impl<K: Key, V> Iterate for SlotMap<K, V> {
 
     #[inline]
     fn iter(&self) -> Self::Iter<'_> {
-        self.iter()
+        SlotMap::iter(self)
     }
     #[inline]
     fn iter_mut(&mut self) -> Self::IterMut<'_> {
-        self.iter_mut()
+        SlotMap::iter_mut(self)
     }
 }
 
@@ -144,7 +152,7 @@ impl<K: Key, V> Drain for SlotMap<K, V> {
 
     #[inline]
     fn drain(&mut self) -> Self::Drain<'_> {
-        self.drain()
+        SlotMap::drain(self)
     }
 }
 
@@ -154,27 +162,27 @@ impl<K: Key, V> InsertWithKey for SlotMap<K, V> {
     where
         F: FnOnce(K) -> Result<V, E>,
     {
-        self.try_insert_with_key(f)
+        SlotMap::try_insert_with_key(self, f)
     }
 }
 
 impl<K: Key, V> GetDisjointMut for SlotMap<K, V> {
     #[inline]
     fn get_disjoint_mut<const N: usize>(&mut self, keys: [K; N]) -> Option<[&mut V; N]> {
-        self.get_disjoint_mut(keys)
+        SlotMap::get_disjoint_mut(self, keys)
     }
     #[inline]
     unsafe fn get_disjoint_unchecked_mut<const N: usize>(&mut self, keys: [K; N]) -> [&mut V; N] {
         // SAFETY: the caller promises that every key has a value and that no
         // two keys refer to the same value.
-        unsafe { self.get_disjoint_unchecked_mut(keys) }
+        unsafe { SlotMap::get_disjoint_unchecked_mut(self, keys) }
     }
 }
 
 impl<K: Key, V> Detach for SlotMap<K, V> {
     #[inline]
     fn detach(&mut self, key: K) -> Option<V> {
-        self.detach(key)
+        SlotMap::detach(self, key)
     }
 
     /// Puts `value` back under `key`.
@@ -184,7 +192,7 @@ impl<K: Key, V> Detach for SlotMap<K, V> {
     /// Panics if `key` is not detached, because a `SlotMap` cannot report it.
     #[inline]
     fn attach(&mut self, key: K, value: V) -> Result<(), V> {
-        self.attach(key, value);
+        SlotMap::reattach(self, key, value);
         Ok(())
     }
 }
@@ -192,7 +200,14 @@ impl<K: Key, V> Detach for SlotMap<K, V> {
 impl<K: Key, V> Capacity for SlotMap<K, V> {
     #[inline]
     fn capacity(&self) -> usize {
-        self.capacity()
+        SlotMap::capacity(self)
+    }
+}
+
+impl<K: Key, V> WithCapacity for SlotMap<K, V> {
+    #[inline]
+    fn with_capacity(capacity: usize) -> Self {
+        SlotMap::with_capacity_and_key(capacity)
     }
 }
 
@@ -200,12 +215,24 @@ impl<K: Key, V> Reserve for SlotMap<K, V> {
     type ReserveError = TryReserveError;
 
     #[inline]
-    fn with_capacity(capacity: usize) -> Self {
-        SlotMap::with_capacity_and_key(capacity)
-    }
-    #[inline]
     fn try_reserve(&mut self, additional: usize) -> Result<(), TryReserveError> {
-        self.try_reserve(additional)
+        SlotMap::try_reserve(self, additional)
+    }
+}
+
+impl<K: Key, V> From<CastMap<SlotMap<K, V>>> for SlotMap<K, V> {
+    /// Returns the backing map of `map`.
+    #[inline]
+    fn from(map: CastMap<SlotMap<K, V>>) -> Self {
+        map.inner.inner
+    }
+}
+
+impl<K: Key, V> From<UnsafeCastMap<SlotMap<K, V>>> for SlotMap<K, V> {
+    /// Returns the backing map of `map`.
+    #[inline]
+    fn from(map: UnsafeCastMap<SlotMap<K, V>>) -> Self {
+        map.inner
     }
 }
 
@@ -218,63 +245,69 @@ unsafe impl<K: Key, V> Map for DenseSlotMap<K, V> {
     type Value = V;
 
     #[inline]
-    fn empty() -> Self {
-        DenseSlotMap::with_key()
-    }
-    #[inline]
-    fn len(&self) -> usize {
-        self.len()
-    }
-    #[inline]
-    fn is_empty(&self) -> bool {
-        self.is_empty()
-    }
-    #[inline]
     fn contains_key(&self, key: K) -> bool {
-        self.contains_key(key)
+        DenseSlotMap::contains_key(self, key)
     }
     #[inline]
     fn get(&self, key: K) -> Option<&V> {
-        self.get(key)
+        DenseSlotMap::get(self, key)
     }
     #[inline]
     unsafe fn get_unchecked(&self, key: K) -> &V {
         // SAFETY: the caller promises that a value is under `key`.
-        unsafe { self.get_unchecked(key) }
+        unsafe { DenseSlotMap::get_unchecked(self, key) }
     }
     #[inline]
     fn get_mut(&mut self, key: K) -> Option<&mut V> {
-        self.get_mut(key)
+        DenseSlotMap::get_mut(self, key)
     }
     #[inline]
     unsafe fn get_unchecked_mut(&mut self, key: K) -> &mut V {
         // SAFETY: the caller promises that a value is under `key`.
-        unsafe { self.get_unchecked_mut(key) }
+        unsafe { DenseSlotMap::get_unchecked_mut(self, key) }
     }
     #[inline]
     fn insert(&mut self, value: V) -> K {
-        self.insert(value)
+        DenseSlotMap::insert(self, value)
+    }
+}
+
+impl<K: Key, V> Empty for DenseSlotMap<K, V> {
+    #[inline]
+    fn empty() -> Self {
+        DenseSlotMap::with_key()
+    }
+}
+
+impl<K: Key, V> Len for DenseSlotMap<K, V> {
+    #[inline]
+    fn len(&self) -> usize {
+        DenseSlotMap::len(self)
+    }
+    #[inline]
+    fn is_empty(&self) -> bool {
+        DenseSlotMap::is_empty(self)
     }
 }
 
 impl<K: Key, V> Remove for DenseSlotMap<K, V> {
     #[inline]
     fn remove(&mut self, key: K) -> Option<V> {
-        self.remove(key)
+        DenseSlotMap::remove(self, key)
     }
 }
 
 impl<K: Key, V> Clear for DenseSlotMap<K, V> {
     #[inline]
     fn clear(&mut self) {
-        self.clear();
+        DenseSlotMap::clear(self);
     }
 }
 
 impl<K: Key, V> Retain for DenseSlotMap<K, V> {
     #[inline]
     fn retain<F: FnMut(K, &mut V) -> bool>(&mut self, f: F) {
-        self.retain(f);
+        DenseSlotMap::retain(self, f);
     }
 }
 
@@ -287,7 +320,7 @@ impl<K: Key, V> IterateKeys for DenseSlotMap<K, V> {
 
     #[inline]
     fn keys(&self) -> Self::Keys<'_> {
-        self.keys()
+        DenseSlotMap::keys(self)
     }
 }
 
@@ -305,11 +338,11 @@ impl<K: Key, V> IterateValues for DenseSlotMap<K, V> {
 
     #[inline]
     fn values(&self) -> Self::Values<'_> {
-        self.values()
+        DenseSlotMap::values(self)
     }
     #[inline]
     fn values_mut(&mut self) -> Self::ValuesMut<'_> {
-        self.values_mut()
+        DenseSlotMap::values_mut(self)
     }
 }
 
@@ -327,11 +360,11 @@ impl<K: Key, V> Iterate for DenseSlotMap<K, V> {
 
     #[inline]
     fn iter(&self) -> Self::Iter<'_> {
-        self.iter()
+        DenseSlotMap::iter(self)
     }
     #[inline]
     fn iter_mut(&mut self) -> Self::IterMut<'_> {
-        self.iter_mut()
+        DenseSlotMap::iter_mut(self)
     }
 }
 
@@ -343,7 +376,7 @@ impl<K: Key, V> Drain for DenseSlotMap<K, V> {
 
     #[inline]
     fn drain(&mut self) -> Self::Drain<'_> {
-        self.drain()
+        DenseSlotMap::drain(self)
     }
 }
 
@@ -353,27 +386,27 @@ impl<K: Key, V> InsertWithKey for DenseSlotMap<K, V> {
     where
         F: FnOnce(K) -> Result<V, E>,
     {
-        self.try_insert_with_key(f)
+        DenseSlotMap::try_insert_with_key(self, f)
     }
 }
 
 impl<K: Key, V> GetDisjointMut for DenseSlotMap<K, V> {
     #[inline]
     fn get_disjoint_mut<const N: usize>(&mut self, keys: [K; N]) -> Option<[&mut V; N]> {
-        self.get_disjoint_mut(keys)
+        DenseSlotMap::get_disjoint_mut(self, keys)
     }
     #[inline]
     unsafe fn get_disjoint_unchecked_mut<const N: usize>(&mut self, keys: [K; N]) -> [&mut V; N] {
         // SAFETY: the caller promises that every key has a value and that no
         // two keys refer to the same value.
-        unsafe { self.get_disjoint_unchecked_mut(keys) }
+        unsafe { DenseSlotMap::get_disjoint_unchecked_mut(self, keys) }
     }
 }
 
 impl<K: Key, V> Detach for DenseSlotMap<K, V> {
     #[inline]
     fn detach(&mut self, key: K) -> Option<V> {
-        self.detach(key)
+        DenseSlotMap::detach(self, key)
     }
 
     /// Puts `value` back under `key`.
@@ -384,7 +417,7 @@ impl<K: Key, V> Detach for DenseSlotMap<K, V> {
     /// it, or if the map is full.
     #[inline]
     fn attach(&mut self, key: K, value: V) -> Result<(), V> {
-        self.attach(key, value);
+        DenseSlotMap::reattach(self, key, value);
         Ok(())
     }
 }
@@ -392,7 +425,14 @@ impl<K: Key, V> Detach for DenseSlotMap<K, V> {
 impl<K: Key, V> Capacity for DenseSlotMap<K, V> {
     #[inline]
     fn capacity(&self) -> usize {
-        self.capacity()
+        DenseSlotMap::capacity(self)
+    }
+}
+
+impl<K: Key, V> WithCapacity for DenseSlotMap<K, V> {
+    #[inline]
+    fn with_capacity(capacity: usize) -> Self {
+        DenseSlotMap::with_capacity_and_key(capacity)
     }
 }
 
@@ -400,11 +440,23 @@ impl<K: Key, V> Reserve for DenseSlotMap<K, V> {
     type ReserveError = TryReserveError;
 
     #[inline]
-    fn with_capacity(capacity: usize) -> Self {
-        DenseSlotMap::with_capacity_and_key(capacity)
-    }
-    #[inline]
     fn try_reserve(&mut self, additional: usize) -> Result<(), TryReserveError> {
-        self.try_reserve(additional)
+        DenseSlotMap::try_reserve(self, additional)
+    }
+}
+
+impl<K: Key, V> From<CastMap<DenseSlotMap<K, V>>> for DenseSlotMap<K, V> {
+    /// Returns the backing map of `map`.
+    #[inline]
+    fn from(map: CastMap<DenseSlotMap<K, V>>) -> Self {
+        map.inner.inner
+    }
+}
+
+impl<K: Key, V> From<UnsafeCastMap<DenseSlotMap<K, V>>> for DenseSlotMap<K, V> {
+    /// Returns the backing map of `map`.
+    #[inline]
+    fn from(map: UnsafeCastMap<DenseSlotMap<K, V>>) -> Self {
+        map.inner
     }
 }

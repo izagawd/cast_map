@@ -750,6 +750,26 @@ fn index_panics_on_stale_key() {
     let _ = &map[key];
 }
 
+// ─── From / into ─────────────────────────────────────────────────────────────
+
+#[test]
+fn converts_to_and_from_the_backing_map() {
+    let mut map = AnyMap::new();
+    let dog: CastKey<Dog, DefaultKey> =
+        map.insert_sized(TypeTaggedBox::new(Dog { name: "Rex".into() }));
+
+    // The values stay in place, so the keys of the cast map still work after
+    // the round trip.
+    let backing: slotmap::SlotMap<DefaultKey, TypeTaggedBox<dyn Any>> = map.into();
+    assert_eq!(backing.len(), 1);
+    let map = AnyMap::from(backing);
+    assert_eq!(map.get(dog).unwrap().name, "Rex");
+
+    let unsafe_map: UnsafeBoxSlotCastMap<DefaultKey, dyn Any> = UnsafeBoxSlotCastMap::new();
+    let backing: slotmap::SlotMap<DefaultKey, Box<dyn Any>> = unsafe_map.into();
+    assert!(UnsafeBoxSlotCastMap::from(backing).is_empty());
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Dense variants: identical behaviour, backed by DenseSlotMap.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -880,5 +900,20 @@ mod dense {
 
         // aliasing keys are rejected
         assert!(map.get_disjoint_mut([k1, k1]).is_none());
+    }
+
+    #[test]
+    fn converts_to_and_from_the_backing_map() {
+        let mut map = AnyMap::new();
+        let dog: CastKey<Dog, DefaultKey> =
+            map.insert_sized(TypeTaggedBox::new(Dog { name: "Rex".into() }));
+        let backing: slotmap::DenseSlotMap<DefaultKey, TypeTaggedBox<dyn Any>> = map.into();
+        let map = AnyMap::from(backing);
+        assert_eq!(map.get(dog).unwrap().name, "Rex");
+
+        let unsafe_map: UnsafeBoxDenseSlotCastMap<DefaultKey, dyn Any> =
+            UnsafeBoxDenseSlotCastMap::new();
+        let backing: slotmap::DenseSlotMap<DefaultKey, Box<dyn Any>> = unsafe_map.into();
+        assert!(UnsafeBoxDenseSlotCastMap::from(backing).is_empty());
     }
 }

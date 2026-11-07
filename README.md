@@ -59,6 +59,8 @@ let dog_key: CastKey<Dog, DefaultKey> = map.downcast_key(dyn_key.inner_key()).un
 
 `Map` is the core of a backing map, and its key can be any `Copy` type. The other traits add capabilities, and a cast map only has the methods whose capability its backing map implements.
 
+* `Empty` adds `new` and `Default`.
+* `Len` adds `len` and `is_empty`.
 * `Remove` adds `remove` and `remove_by_inner_key`.
 * `Clear` adds `clear`.
 * `Retain` adds `retain`.
@@ -69,9 +71,11 @@ let dog_key: CastKey<Dog, DefaultKey> = map.downcast_key(dyn_key.inner_key()).un
 * `InsertWithKey` adds the `*_with_key` inserts.
 * `GetDisjointMut` adds the `get_disjoint_*` methods.
 * `Detach` adds detaching and attaching.
-* `Capacity` adds `capacity`, and `Reserve` adds `with_capacity` and `try_reserve`.
+* `Capacity` adds `capacity`, `WithCapacity` adds `with_capacity`, and `Reserve` adds `try_reserve`.
 
-The `slotmap` maps implement all of them. A `GenMap` implements `Reserve` only when its storage can grow, and a `DenseGenMap` only when its slot and value storages can.
+The `slotmap` maps implement all of them. `GenMap` and `DenseGenMap` implement `Empty` and `WithCapacity` only when their storages can be created empty or with a capacity, and `Reserve` only when their storages can grow. A `GenMap` implements `Len` only when its config's `Len` is `KeepLen`.
+
+`From` turns any backing map into either cast map, and turns a cast map back into its `slotmap` or `gen_map` backing map.
 
 ## `AnyHaver`: the type check on the key side
 

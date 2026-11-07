@@ -2,6 +2,8 @@
 //! here adds a capability. A cast map only has the methods whose capability its
 //! backing map implements.
 //!
+//! - [`Empty`] adds `new` and `Default`.
+//! - [`Len`] adds `len` and `is_empty`.
 //! - [`Remove`] adds `remove` and `remove_by_inner_key`.
 //! - [`Clear`] adds `clear`.
 //! - [`Retain`] adds `retain`.
@@ -14,14 +16,16 @@
 //! - [`GetDisjointMut`] adds the `get_disjoint_*` methods.
 //! - [`Detach`] adds detaching and attaching.
 //! - [`Capacity`] adds `capacity`.
-//! - [`Reserve`] adds `with_capacity` and `try_reserve`.
+//! - [`WithCapacity`] adds `with_capacity`.
+//! - [`Reserve`] adds `try_reserve`.
 //! - `IntoIterator` adds `into_iter` to an owned cast map.
 //!
-//! The `slotmap` maps implement all of them. A `GenMap` implements [`Reserve`]
-//! only when its storage can grow, and `IntoIterator` only when its storage
-//! does. A `DenseGenMap` implements [`Reserve`] only when its slot and value
-//! storages can grow, and `IntoIterator` only when its key and value storages
-//! do.
+//! The `slotmap` maps implement all of them. `GenMap` and `DenseGenMap`
+//! implement [`Empty`] and [`WithCapacity`] only when their storages can be
+//! created empty or with a capacity, [`Reserve`] only when their storages can
+//! grow, and `IntoIterator` only when their storages can be turned into
+//! iterators. A `GenMap` implements [`Len`] only when its config's `Len` is
+//! `KeepLen`.
 
 use std::ops::Deref;
 
@@ -53,18 +57,6 @@ pub unsafe trait Map: Sized {
 
     /// The type of the values. A cast map stores smart pointers here.
     type Value;
-
-    /// Creates an empty map.
-    fn empty() -> Self;
-
-    /// Returns the number of values in the map.
-    fn len(&self) -> usize;
-
-    /// Returns `true` if the map holds no values.
-    #[inline]
-    fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
 
     /// Returns `true` if a value is under `key`.
     #[inline]
@@ -109,6 +101,24 @@ pub unsafe trait Map: Sized {
 }
 
 // ─── Capabilities ────────────────────────────────────────────────────────────
+
+/// A backing map that can be created empty.
+pub trait Empty: Map {
+    /// Creates an empty map.
+    fn empty() -> Self;
+}
+
+/// A backing map that knows how many values it holds.
+pub trait Len: Map {
+    /// Returns the number of values in the map.
+    fn len(&self) -> usize;
+
+    /// Returns `true` if the map holds no values.
+    #[inline]
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
 
 /// A backing map that can remove a single value.
 pub trait Remove: Map {
@@ -256,13 +266,16 @@ pub trait Capacity: Map {
     fn capacity(&self) -> usize;
 }
 
+/// A backing map that can be created with room for a given number of values.
+pub trait WithCapacity: Map {
+    /// Creates an empty map with room for at least `capacity` values.
+    fn with_capacity(capacity: usize) -> Self;
+}
+
 /// A backing map that can make room for more values ahead of time.
 pub trait Reserve: Capacity {
     /// Why [`try_reserve`](Self::try_reserve) could not make the room.
     type ReserveError;
-
-    /// Creates an empty map with room for at least `capacity` values.
-    fn with_capacity(capacity: usize) -> Self;
 
     /// Makes room for at least `additional` more values.
     ///
