@@ -2,15 +2,15 @@
 //! `TypeTaggedBox<dyn Any>`, and hand out typed [`CastKey`]s, so that
 //! `map.get(key)` returns a `&T` with no `downcast_ref` at the call site.
 //!
-//! [`CastMapG`] checks every lookup against the type id stored with the value,
-//! so a key of the wrong type returns `None`. [`UnsafeCastMapG`] skips that
+//! [`CastMap`] checks every lookup against the type id stored with the value,
+//! so a key of the wrong type returns `None`. [`UnsafeCastMap`] skips that
 //! check, so its typed lookups are `unsafe`. Both keep their values in a
 //! backing map, which is any type that implements [`Map`].
 //!
 //! # Cargo features
 //!
 //! - `slotmap` adds `slotmap::SlotMap` and `slotmap::DenseSlotMap` as backing
-//!   maps, with aliases such as `BoxCastMap<K, T>`.
+//!   maps, with aliases such as `BoxSlotCastMap<K, T>`.
 //! - `gen_map` adds `gen_map::GenMap` as a backing map, with aliases such as
 //!   `BoxGenCastMap<T, C>`.
 //! - `coerce_unsized` adds the coercion from a `TypeTaggedBox<Dog>` to a
@@ -27,8 +27,8 @@
 //! declaring it as a supertrait (`trait Foo: AnyHaver`), which puts the lookup
 //! in `dyn Foo`'s vtable. `dyn Any` has no such supertrait, so
 //! `map.get(dyn_any_key)` is a **compile error** — recover a typed key with
-//! [`downcast_key`](CastMapG::downcast_key) or read type-erased through
-//! [`get_by_inner_key`](CastMapG::get_by_inner_key) instead.
+//! [`downcast_key`](CastMap::downcast_key) or read type-erased through
+//! [`get_by_inner_key`](CastMap::get_by_inner_key) instead.
 //!
 //! # Dyn-dispatchable keys
 //! [`DynKey`] (via [`CastKey::as_dyn`]) is a borrowed key that can be a trait
@@ -47,12 +47,12 @@
 //! This example needs the `slotmap` and `coerce_unsized` features.
 //!
 //! ```ignore
-//! use cast_map::{BoxCastMap, TypeTaggedBox, CastKey, DefaultKey};
+//! use cast_map::{BoxSlotCastMap, TypeTaggedBox, CastKey, DefaultKey};
 //! use std::any::Any;
 //!
 //! struct Dog { name: String }
 //!
-//! let mut map: BoxCastMap<DefaultKey, dyn Any> = BoxCastMap::new();
+//! let mut map: BoxSlotCastMap<DefaultKey, dyn Any> = BoxSlotCastMap::new();
 //!
 //! // Insert a concrete type into a `dyn Any` map; the key comes back typed.
 //! let dog_key: CastKey<Dog, DefaultKey> = map.insert_sized(TypeTaggedBox::new(Dog { name: "Rex".into() }));
@@ -93,17 +93,20 @@ pub use any_haver::{type_id_from_metadata, AnyHaver};
 #[doc(inline)]
 pub use cast_key::CastKey;
 #[doc(inline)]
-pub use cast_map::CastMapG;
+pub use cast_map::CastMap;
 #[cfg(feature = "slotmap")]
 #[doc(inline)]
-pub use cast_map::{BoxCastMap, BoxDenseCastMap, CastMap, DenseCastMap};
+pub use cast_map::{BoxDenseSlotCastMap, BoxSlotCastMap, DenseSlotCastMap, SlotCastMap};
 #[cfg(feature = "gen_map")]
 #[doc(inline)]
 pub use cast_map::{BoxGenCastMap, GenCastMap};
 #[doc(inline)]
 pub use dyn_key::DynKey;
 #[doc(inline)]
-pub use map::{Capacity, Detach, GetDisjointMut, InsertWithKey, Map, Reserve};
+pub use map::{
+    Capacity, Clear, Detach, Drain, GetDisjointMut, InsertWithKey, Iterate, IterateKeys,
+    IterateValues, Map, Remove, Reserve, Retain,
+};
 #[doc(inline)]
 pub use retype_ptr::RetypePtr;
 #[cfg(feature = "coerce_unsized")]
@@ -114,11 +117,11 @@ pub use stable_deref_trait::StableDeref;
 #[doc(inline)]
 pub use type_tagged_ptr::{ConcreteTypeId, DynAny, TypeTaggedBox, TypeTaggedPtr};
 #[doc(inline)]
-pub use unsafe_cast_map::UnsafeCastMapG;
+pub use unsafe_cast_map::UnsafeCastMap;
 #[cfg(feature = "slotmap")]
 #[doc(inline)]
 pub use unsafe_cast_map::{
-    UnsafeBoxCastMap, UnsafeBoxDenseCastMap, UnsafeCastMap, UnsafeDenseCastMap,
+    UnsafeBoxDenseSlotCastMap, UnsafeBoxSlotCastMap, UnsafeDenseSlotCastMap, UnsafeSlotCastMap,
 };
 #[cfg(feature = "gen_map")]
 #[doc(inline)]

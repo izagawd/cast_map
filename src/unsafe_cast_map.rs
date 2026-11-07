@@ -1,7 +1,7 @@
-//! [`UnsafeCastMapG`] is the low-level cast map. It rebuilds typed references
+//! [`UnsafeCastMap`] is the low-level cast map. It rebuilds typed references
 //! from the metadata that a key caches, so its typed `get`, `get_mut` and
 //! `remove` are `unsafe`, and the caller must make sure that the metadata fits
-//! the value under the key. [`CastMapG`](crate::cast_map::CastMapG) checks that
+//! the value under the key. [`CastMap`](crate::cast_map::CastMap) checks that
 //! instead.
 //!
 //! The map is generic over its backing map `M`, and every method forwards to
@@ -18,7 +18,10 @@ use gen_map::{DefaultMapConfig, GenMap};
 use slotmap::{DenseSlotMap, SlotMap};
 
 use crate::cast_key::CastKey;
-use crate::map::{Capacity, Detach, GetDisjointMut, InsertWithKey, MTarget, Map, Reserve};
+use crate::map::{
+    self, Capacity, Clear, Detach, GetDisjointMut, InsertWithKey, Iterate, IterateKeys,
+    IterateValues, MTarget, Map, Remove, Reserve, Retain,
+};
 use crate::retype_ptr::RetypePtr;
 use stable_deref_trait::StableDeref;
 
@@ -34,18 +37,18 @@ where
     CastKey::from_raw_parts(key, metadata)
 }
 
-// ─── UnsafeCastMapG ────────────────────────────────────────────────────────────
+// ─── UnsafeCastMap ───────────────────────────────────────────────────────────
 
 /// A cast map over the backing map `M`, with typed lookups through
 /// [`CastKey`]. Its values must implement [`StableDeref`] for the metadata
 /// casts to be sound.
-pub struct UnsafeCastMapG<M> {
+pub struct UnsafeCastMap<M> {
     pub(crate) inner: M,
 }
 
 // ─── Clone ───────────────────────────────────────────────────────────────────
 
-impl<M> Clone for UnsafeCastMapG<M>
+impl<M> Clone for UnsafeCastMap<M>
 where
     M: Map + Clone,
 {
@@ -64,7 +67,7 @@ where
     }
 }
 
-impl<M> Default for UnsafeCastMapG<M>
+impl<M> Default for UnsafeCastMap<M>
 where
     M: Map,
     M::Value: StableDeref,
@@ -77,7 +80,7 @@ where
 
 // ─── Basic methods (no pointer metadata needed) ──────────────────────────────
 
-impl<M> UnsafeCastMapG<M>
+impl<M> UnsafeCastMap<M>
 where
     M: Map,
     M::Value: StableDeref,
@@ -153,15 +156,6 @@ where
         self.inner.capacity()
     }
 
-    /// Reserves capacity for at least `additional` more elements.
-    #[inline]
-    pub fn reserve(&mut self, additional: usize)
-    where
-        M: Reserve,
-    {
-        self.inner.reserve(additional);
-    }
-
     /// Tries to reserve capacity for at least `additional` more elements.
     #[inline]
     pub fn try_reserve(&mut self, additional: usize) -> Result<(), M::ReserveError>
@@ -173,7 +167,10 @@ where
 
     /// Removes every value from the map.
     #[inline]
-    pub fn clear(&mut self) {
+    pub fn clear(&mut self)
+    where
+        M: Clear,
+    {
         self.inner.clear();
     }
 
@@ -197,20 +194,37 @@ where
 
     /// Removes the value under a backing key and returns its pointer.
     #[inline]
-    pub fn remove_by_inner_key(&mut self, key: M::Key) -> Option<M::Value> {
+    pub fn remove_by_inner_key(&mut self, key: M::Key) -> Option<M::Value>
+    where
+        M: Remove,
+    {
         self.inner.remove(key)
+    }
+
+    /// Iterates over every backing key.
+    #[inline]
+    pub fn inner_keys(&self) -> M::Keys<'_>
+    where
+        M: IterateKeys,
+    {
+        self.inner.keys()
     }
 
     /// Shared iterator over output references only.
     #[inline]
-    pub fn values(&self) -> impl Iterator<Item = &MTarget<M>> + '_ {
-        self.inner.values().map(|p| &**p)
+    pub fn values(&self) -> Values<'_, M>
+    where
+        M: IterateValues,
+    {
+        Values {
+            inner: self.inner.values(),
+        }
     }
 }
 
 // ── backing-key access requiring `&mut Output` ───────────────────────────────
 
-impl<M> UnsafeCastMapG<M>
+impl<M> UnsafeCastMap<M>
 where
     M: Map,
     M::Value: StableDeref + DerefMut,
@@ -223,8 +237,13 @@ where
 
     /// Mutable iterator over output references only.
     #[inline]
-    pub fn values_mut(&mut self) -> impl Iterator<Item = &mut MTarget<M>> + '_ {
-        self.inner.values_mut().map(|p| &mut **p)
+    pub fn values_mut(&mut self) -> ValuesMut<'_, M>
+    where
+        M: IterateValues,
+    {
+        ValuesMut {
+            inner: self.inner.values_mut(),
+        }
     }
 
     /// Returns a mutable reference to the value under each backing key, or
@@ -262,7 +281,7 @@ where
 
 // ─── Core operations (require pointer metadata) ──────────────────────────────
 
-impl<M> UnsafeCastMapG<M>
+impl<M> UnsafeCastMap<M>
 where
     M: Map,
     M::Value: StableDeref,
@@ -520,6 +539,7 @@ where
         key: CastKey<T, M::Key>,
     ) -> Option<<M::Value as RetypePtr<'a>>::Retyped<T>>
     where
+        M: Remove,
         <T as Pointee>::Metadata: Copy,
         M::Value: RetypePtr<'a>,
     {
@@ -531,15 +551,22 @@ where
 
     /// Lazy iterator over all [`CastKey`]s.
     #[inline]
-    pub fn keys(&self) -> impl Iterator<Item = CastKey<MTarget<M>, M::Key>> + '_ {
-        self.inner
-            .iter()
-            .map(|(k, p)| to_castable::<M::Key, MTarget<M>>(k, &**p))
+    pub fn keys(&self) -> Keys<'_, M>
+    where
+        M: IterateKeys,
+    {
+        Keys {
+            map: &self.inner,
+            inner: self.inner.keys(),
+        }
     }
 
     /// Shared iterator over all occupied `(CastKey, &output)` pairs (safe).
     #[inline]
-    pub fn iter(&self) -> Iter<'_, M> {
+    pub fn iter(&self) -> Iter<'_, M>
+    where
+        M: Iterate,
+    {
         Iter {
             inner: self.inner.iter(),
         }
@@ -549,7 +576,10 @@ where
 
     /// Draining iterator. Removes all elements and yields them.
     #[inline]
-    pub fn drain(&mut self) -> Drain<'_, M> {
+    pub fn drain(&mut self) -> Drain<'_, M>
+    where
+        M: map::Drain,
+    {
         Drain {
             inner: self.inner.drain(),
         }
@@ -558,7 +588,7 @@ where
 
 // ─── Core operations requiring `&mut Output` ─────────────────────────────────
 
-impl<M> UnsafeCastMapG<M>
+impl<M> UnsafeCastMap<M>
 where
     M: Map,
     M::Value: StableDeref + DerefMut,
@@ -606,6 +636,7 @@ where
     #[inline]
     pub fn retain<F>(&mut self, mut f: F)
     where
+        M: Retain,
         F: FnMut(CastKey<MTarget<M>, M::Key>, &mut MTarget<M>) -> bool,
     {
         self.inner.retain(|inner_key, stored| {
@@ -616,7 +647,10 @@ where
 
     /// Mutable iterator over all occupied `(CastKey, &mut output)` pairs (safe).
     #[inline]
-    pub fn iter_mut(&mut self) -> IterMut<'_, M> {
+    pub fn iter_mut(&mut self) -> IterMut<'_, M>
+    where
+        M: Iterate,
+    {
         IterMut {
             inner: self.inner.iter_mut(),
         }
@@ -683,7 +717,7 @@ where
 
 // ─── detach / attach (backing key) ────────────────────────────
 
-impl<M> UnsafeCastMapG<M>
+impl<M> UnsafeCastMap<M>
 where
     M: Detach,
     M::Value: StableDeref,
@@ -708,7 +742,7 @@ where
 
 // ─── detach (cast key) ───────────────────────────────────────────
 
-impl<M> UnsafeCastMapG<M>
+impl<M> UnsafeCastMap<M>
 where
     M: Detach,
     M::Value: StableDeref,
@@ -736,20 +770,115 @@ where
     }
 }
 
+// ─── Keys ────────────────────────────────────────────────────────────────────
+
+/// Iterator over the [`CastKey`] of every value. It reads each key's metadata
+/// from the value under the backing key.
+pub struct Keys<'a, M>
+where
+    M: IterateKeys + 'a,
+    M::Value: 'a,
+{
+    map: &'a M,
+    inner: <M as IterateKeys>::Keys<'a>,
+}
+
+impl<'a, M> Iterator for Keys<'a, M>
+where
+    M: IterateKeys + 'a,
+    M::Value: StableDeref + 'a,
+    MTarget<M>: Pointee,
+    <MTarget<M> as Pointee>::Metadata: Copy,
+{
+    type Item = CastKey<MTarget<M>, M::Key>;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        let key = self.inner.next()?;
+        // SAFETY: the `Map` contract promises that every key that `keys` yields
+        // has a value.
+        let value = unsafe { self.map.get_unchecked(key) };
+        Some(to_castable::<M::Key, MTarget<M>>(key, &**value))
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.inner.size_hint()
+    }
+}
+
+// ─── Values ──────────────────────────────────────────────────────────────────
+
+/// Shared iterator over the `&Target` of every value.
+pub struct Values<'a, M>
+where
+    M: IterateValues + 'a,
+    M::Value: 'a,
+{
+    inner: <M as IterateValues>::Values<'a>,
+}
+
+impl<'a, M> Iterator for Values<'a, M>
+where
+    M: IterateValues + 'a,
+    M::Value: StableDeref + 'a,
+{
+    type Item = &'a MTarget<M>;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner.next().map(|p| &**p)
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.inner.size_hint()
+    }
+}
+
+// ─── ValuesMut ───────────────────────────────────────────────────────────────
+
+/// Mutable iterator over the `&mut Target` of every value.
+pub struct ValuesMut<'a, M>
+where
+    M: IterateValues + 'a,
+    M::Value: 'a,
+{
+    inner: <M as IterateValues>::ValuesMut<'a>,
+}
+
+impl<'a, M> Iterator for ValuesMut<'a, M>
+where
+    M: IterateValues + 'a,
+    M::Value: StableDeref + DerefMut + 'a,
+{
+    type Item = &'a mut MTarget<M>;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner.next().map(|p| &mut **p)
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.inner.size_hint()
+    }
+}
+
 // ─── Iter (shared) ───────────────────────────────────────────────────────────
 
 /// Shared iterator over `(CastKey, &Target)` pairs.
 pub struct Iter<'a, M>
 where
-    M: Map + 'a,
+    M: Iterate + 'a,
     M::Value: 'a,
 {
-    inner: <M as Map>::Iter<'a>,
+    inner: <M as Iterate>::Iter<'a>,
 }
 
 impl<'a, M> Iterator for Iter<'a, M>
 where
-    M: Map + 'a,
+    M: Iterate + 'a,
     M::Value: StableDeref + 'a,
     MTarget<M>: Pointee,
     <MTarget<M> as Pointee>::Metadata: Copy,
@@ -774,15 +903,15 @@ where
 /// Mutable iterator over `(CastKey, &mut Target)` pairs.
 pub struct IterMut<'a, M>
 where
-    M: Map + 'a,
+    M: Iterate + 'a,
     M::Value: 'a,
 {
-    inner: <M as Map>::IterMut<'a>,
+    inner: <M as Iterate>::IterMut<'a>,
 }
 
 impl<'a, M> Iterator for IterMut<'a, M>
 where
-    M: Map + 'a,
+    M: Iterate + 'a,
     M::Value: StableDeref + DerefMut + 'a,
     MTarget<M>: Pointee,
     <MTarget<M> as Pointee>::Metadata: Copy,
@@ -807,15 +936,15 @@ where
 /// Draining iterator over `(CastKey, value)`, emptying the map.
 pub struct Drain<'a, M>
 where
-    M: Map + 'a,
+    M: map::Drain + 'a,
     M::Value: 'a,
 {
-    inner: <M as Map>::Drain<'a>,
+    inner: <M as map::Drain>::Drain<'a>,
 }
 
 impl<'a, M> Iterator for Drain<'a, M>
 where
-    M: Map + 'a,
+    M: map::Drain + 'a,
     M::Value: StableDeref + 'a,
     MTarget<M>: Pointee,
     <MTarget<M> as Pointee>::Metadata: Copy,
@@ -868,7 +997,7 @@ where
     }
 }
 
-impl<M> IntoIterator for UnsafeCastMapG<M>
+impl<M> IntoIterator for UnsafeCastMap<M>
 where
     M: Map + IntoIterator<Item = (<M as Map>::Key, <M as Map>::Value)>,
     M::Value: StableDeref,
@@ -886,9 +1015,9 @@ where
     }
 }
 
-impl<'a, M> IntoIterator for &'a UnsafeCastMapG<M>
+impl<'a, M> IntoIterator for &'a UnsafeCastMap<M>
 where
-    M: Map + 'a,
+    M: Iterate + 'a,
     M::Value: StableDeref + 'a,
     MTarget<M>: Pointee,
     <MTarget<M> as Pointee>::Metadata: Copy,
@@ -902,9 +1031,9 @@ where
     }
 }
 
-impl<'a, M> IntoIterator for &'a mut UnsafeCastMapG<M>
+impl<'a, M> IntoIterator for &'a mut UnsafeCastMap<M>
 where
-    M: Map + 'a,
+    M: Iterate + 'a,
     M::Value: StableDeref + DerefMut + 'a,
     MTarget<M>: Pointee,
     <MTarget<M> as Pointee>::Metadata: Copy,
@@ -922,25 +1051,25 @@ where
 
 /// Raw castable-key map backed by [`slotmap::SlotMap`] (sparse storage).
 #[cfg(feature = "slotmap")]
-pub type UnsafeCastMap<K, Ptr> = UnsafeCastMapG<SlotMap<K, Ptr>>;
+pub type UnsafeSlotCastMap<K, Ptr> = UnsafeCastMap<SlotMap<K, Ptr>>;
 
 /// Raw castable-key map backed by [`slotmap::DenseSlotMap`]: values are stored
 /// contiguously for fast iteration, at the cost of one extra indirection per
 /// lookup, and `remove` swaps the last element into the vacated position.
 #[cfg(feature = "slotmap")]
-pub type UnsafeDenseCastMap<K, Ptr> = UnsafeCastMapG<DenseSlotMap<K, Ptr>>;
+pub type UnsafeDenseSlotCastMap<K, Ptr> = UnsafeCastMap<DenseSlotMap<K, Ptr>>;
 
-/// Convenience alias: [`UnsafeCastMap`] storing `Box<T>`
+/// An [`UnsafeSlotCastMap`] that stores `Box<T>`.
 #[cfg(feature = "slotmap")]
-pub type UnsafeBoxCastMap<K, T> = UnsafeCastMap<K, Box<T>>;
+pub type UnsafeBoxSlotCastMap<K, T> = UnsafeSlotCastMap<K, Box<T>>;
 
-/// Convenience alias: [`UnsafeDenseCastMap`] storing `Box<T>`
+/// An [`UnsafeDenseSlotCastMap`] that stores `Box<T>`.
 #[cfg(feature = "slotmap")]
-pub type UnsafeBoxDenseCastMap<K, T> = UnsafeDenseCastMap<K, Box<T>>;
+pub type UnsafeBoxDenseSlotCastMap<K, T> = UnsafeDenseSlotCastMap<K, Box<T>>;
 
 /// Raw castable-key map backed by a [`gen_map::GenMap`] with config `C`.
 #[cfg(feature = "gen_map")]
-pub type UnsafeGenCastMap<Ptr, C = DefaultMapConfig> = UnsafeCastMapG<GenMap<Ptr, C>>;
+pub type UnsafeGenCastMap<Ptr, C = DefaultMapConfig> = UnsafeCastMap<GenMap<Ptr, C>>;
 
 /// An [`UnsafeGenCastMap`] that stores `Box<T>`.
 #[cfg(feature = "gen_map")]

@@ -1,16 +1,17 @@
-//! Tests for a backing map that wraps a `Vec`, uses `usize` keys and only
-//! implements [`Map`] and `IntoIterator`.
+//! Tests for backing maps that wrap a `Vec` and use `usize` keys. `VecMap`
+//! implements [`Map`], `IntoIterator` and the capability traits for removing
+//! and iterating. `PushOnlyMap` implements only [`Map`].
 
 use std::any::Any;
 
 use super::{Cat, Dog};
 use crate::any_haver::AnyHaver;
 use crate::cast_key::CastKey;
-use crate::cast_map::CastMapG;
+use crate::cast_map::CastMap;
 use crate::dyn_key::DynKey;
-use crate::map::Map;
+use crate::map::{Clear, Drain, Iterate, IterateKeys, IterateValues, Map, Remove, Retain};
 use crate::type_tagged_ptr::TypeTaggedBox;
-use crate::unsafe_cast_map::UnsafeCastMapG;
+use crate::unsafe_cast_map::UnsafeCastMap;
 use crate::upcast_key;
 
 /// A map over a `Vec` whose keys are indices. Removing leaves `None` behind and
@@ -25,35 +26,6 @@ struct VecMap<V> {
 unsafe impl<V: 'static> Map for VecMap<V> {
     type Key = usize;
     type Value = V;
-    type Iter<'a>
-        = Box<dyn Iterator<Item = (usize, &'a V)> + 'a>
-    where
-        Self: 'a,
-        V: 'a;
-    type IterMut<'a>
-        = Box<dyn Iterator<Item = (usize, &'a mut V)> + 'a>
-    where
-        Self: 'a,
-        V: 'a;
-    type Keys<'a>
-        = Box<dyn Iterator<Item = usize> + 'a>
-    where
-        Self: 'a,
-        V: 'a;
-    type Values<'a>
-        = Box<dyn Iterator<Item = &'a V> + 'a>
-    where
-        Self: 'a,
-        V: 'a;
-    type ValuesMut<'a>
-        = Box<dyn Iterator<Item = &'a mut V> + 'a>
-    where
-        Self: 'a,
-        V: 'a;
-    type Drain<'a>
-        = std::vec::IntoIter<(usize, V)>
-    where
-        Self: 'a;
 
     fn empty() -> Self {
         Self {
@@ -64,21 +36,35 @@ unsafe impl<V: 'static> Map for VecMap<V> {
     fn len(&self) -> usize {
         self.len
     }
-    fn clear(&mut self) {
-        self.slots.iter_mut().for_each(|slot| *slot = None);
-        self.len = 0;
-    }
     fn get(&self, key: usize) -> Option<&V> {
         self.slots.get(key)?.as_ref()
     }
     fn get_mut(&mut self, key: usize) -> Option<&mut V> {
         self.slots.get_mut(key)?.as_mut()
     }
+    fn insert(&mut self, value: V) -> usize {
+        self.slots.push(Some(value));
+        self.len += 1;
+        self.slots.len() - 1
+    }
+}
+
+impl<V: 'static> Remove for VecMap<V> {
     fn remove(&mut self, key: usize) -> Option<V> {
         let value = self.slots.get_mut(key)?.take()?;
         self.len -= 1;
         Some(value)
     }
+}
+
+impl<V: 'static> Clear for VecMap<V> {
+    fn clear(&mut self) {
+        self.slots.iter_mut().for_each(|slot| *slot = None);
+        self.len = 0;
+    }
+}
+
+impl<V: 'static> Retain for VecMap<V> {
     fn retain<F: FnMut(usize, &mut V) -> bool>(&mut self, mut f: F) {
         for (index, slot) in self.slots.iter_mut().enumerate() {
             if let Some(value) = slot {
@@ -89,20 +75,52 @@ unsafe impl<V: 'static> Map for VecMap<V> {
             }
         }
     }
-    fn insert(&mut self, value: V) -> usize {
-        self.slots.push(Some(value));
-        self.len += 1;
-        self.slots.len() - 1
-    }
+}
+
+impl<V: 'static> IterateKeys for VecMap<V> {
+    type Keys<'a>
+        = Box<dyn Iterator<Item = usize> + 'a>
+    where
+        Self: 'a,
+        V: 'a;
+
     fn keys(&self) -> Self::Keys<'_> {
         Box::new(self.iter().map(|(key, _)| key))
     }
+}
+
+impl<V: 'static> IterateValues for VecMap<V> {
+    type Values<'a>
+        = Box<dyn Iterator<Item = &'a V> + 'a>
+    where
+        Self: 'a,
+        V: 'a;
+    type ValuesMut<'a>
+        = Box<dyn Iterator<Item = &'a mut V> + 'a>
+    where
+        Self: 'a,
+        V: 'a;
+
     fn values(&self) -> Self::Values<'_> {
         Box::new(self.slots.iter().flatten())
     }
     fn values_mut(&mut self) -> Self::ValuesMut<'_> {
         Box::new(self.slots.iter_mut().flatten())
     }
+}
+
+impl<V: 'static> Iterate for VecMap<V> {
+    type Iter<'a>
+        = Box<dyn Iterator<Item = (usize, &'a V)> + 'a>
+    where
+        Self: 'a,
+        V: 'a;
+    type IterMut<'a>
+        = Box<dyn Iterator<Item = (usize, &'a mut V)> + 'a>
+    where
+        Self: 'a,
+        V: 'a;
+
     fn iter(&self) -> Self::Iter<'_> {
         Box::new(
             self.slots
@@ -119,6 +137,14 @@ unsafe impl<V: 'static> Map for VecMap<V> {
                 .filter_map(|(index, slot)| Some((index, slot.as_mut()?))),
         )
     }
+}
+
+impl<V: 'static> Drain for VecMap<V> {
+    type Drain<'a>
+        = std::vec::IntoIter<(usize, V)>
+    where
+        Self: 'a;
+
     fn drain(&mut self) -> Self::Drain<'_> {
         // The values are taken out right away, so `len` stays right even if
         // the caller drops the iterator early.
@@ -147,7 +173,37 @@ impl<V: 'static> IntoIterator for VecMap<V> {
     }
 }
 
-type AnyVecMap = CastMapG<VecMap<TypeTaggedBox<dyn Any>>>;
+/// A map over a `Vec` that can only insert and look up values.
+struct PushOnlyMap<V> {
+    values: Vec<V>,
+}
+
+// SAFETY: nothing takes a value out, so each value stays at the index that
+// `insert` returned for it, and `get` and `get_mut` read the element at the
+// key's index.
+unsafe impl<V> Map for PushOnlyMap<V> {
+    type Key = usize;
+    type Value = V;
+
+    fn empty() -> Self {
+        Self { values: Vec::new() }
+    }
+    fn len(&self) -> usize {
+        self.values.len()
+    }
+    fn get(&self, key: usize) -> Option<&V> {
+        self.values.get(key)
+    }
+    fn get_mut(&mut self, key: usize) -> Option<&mut V> {
+        self.values.get_mut(key)
+    }
+    fn insert(&mut self, value: V) -> usize {
+        self.values.push(value);
+        self.values.len() - 1
+    }
+}
+
+type AnyVecMap = CastMap<VecMap<TypeTaggedBox<dyn Any>>>;
 
 /// Inserts `value` as a `dyn Any` and returns a typed key for it.
 fn insert_typed<T: Any>(map: &mut AnyVecMap, value: T) -> CastKey<T, usize> {
@@ -173,7 +229,7 @@ impl Speak for Cat {
 
 #[test]
 fn backing_keys_match_iter() {
-    fn check<M: Map<Value = u32>>()
+    fn check<M: Map<Value = u32> + Remove + IterateKeys + Iterate>()
     where
         M::Key: PartialEq + std::fmt::Debug,
     {
@@ -197,7 +253,56 @@ fn backing_keys_match_iter() {
 }
 
 #[test]
+fn cast_keys_match_iter() {
+    fn check<M>()
+    where
+        M: Map<Value = TypeTaggedBox<dyn Any>> + Remove + IterateKeys + Iterate,
+        M::Key: PartialEq + std::fmt::Debug,
+    {
+        let mut map: CastMap<M> = CastMap::new();
+        map.insert(TypeTaggedBox::from_any(Box::new(Dog {
+            name: "Rex".into(),
+        })));
+        let removed = map.insert(TypeTaggedBox::from_any(Box::new(Cat { lives: 9 })));
+        map.insert(TypeTaggedBox::from_any(Box::new(Cat { lives: 2 })));
+        map.remove_by_inner_key(removed.inner_key()).unwrap();
+
+        // Each pair holds the metadata too, because `==` on a `CastKey` only
+        // compares the backing keys.
+        let pair = |key: CastKey<dyn Any, M::Key>| (key.inner_key(), key.metadata());
+        let from_keys: Vec<_> = map.keys().map(pair).collect();
+        let from_iter: Vec<_> = map.iter().map(|(key, _)| pair(key)).collect();
+        assert_eq!(from_keys.len(), 2);
+        assert_eq!(from_keys, from_iter);
+    }
+    #[cfg(feature = "slotmap")]
+    check::<slotmap::SlotMap<crate::DefaultKey, TypeTaggedBox<dyn Any>>>();
+    #[cfg(feature = "slotmap")]
+    check::<slotmap::DenseSlotMap<crate::DefaultKey, TypeTaggedBox<dyn Any>>>();
+    #[cfg(feature = "gen_map")]
+    check::<gen_map::GenMap<TypeTaggedBox<dyn Any>>>();
+    check::<VecMap<TypeTaggedBox<dyn Any>>>();
+}
+
+#[test]
 fn cast_map_works_on_core_trait_alone() {
+    let mut map: CastMap<PushOnlyMap<TypeTaggedBox<dyn Any>>> = CastMap::new();
+    let erased = map.insert(TypeTaggedBox::from_any(Box::new(Dog {
+        name: "Rex".into(),
+    })));
+    let dog: CastKey<Dog, usize> = map.downcast_key(erased.inner_key()).unwrap();
+    assert_eq!(map.len(), 1);
+
+    map.get_mut(dog).unwrap().name.push('!');
+    assert_eq!(map[dog].name, "Rex!");
+
+    // A key whose type does not match its value is rejected.
+    let wrong: CastKey<Cat, usize> = CastKey::from_raw_parts(dog.inner_key(), ());
+    assert!(map.get(wrong).is_none());
+}
+
+#[test]
+fn cast_map_works_on_a_vec_map() {
     let mut map = AnyVecMap::new();
     let dog = insert_typed(&mut map, Dog { name: "Rex".into() });
     let cat_erased = map.insert(TypeTaggedBox::from_any(Box::new(Cat { lives: 9 })));
@@ -239,7 +344,7 @@ fn cast_map_works_on_core_trait_alone() {
 
 #[cfg(feature = "coerce_unsized")]
 #[test]
-fn coercing_inserts_work_on_core_trait_alone() {
+fn coercing_inserts_work_on_a_vec_map() {
     use crate::type_tagged_ptr::ConcreteTypeId;
 
     let mut map = AnyVecMap::new();
@@ -276,7 +381,7 @@ fn owned_into_iter_uses_backing_into_iterator() {
 
 #[test]
 fn unsafe_map_with_usize_keys() {
-    let mut map: UnsafeCastMapG<VecMap<Box<dyn Any>>> = UnsafeCastMapG::new();
+    let mut map: UnsafeCastMap<VecMap<Box<dyn Any>>> = UnsafeCastMap::new();
     let erased = map.insert(Box::new(Dog { name: "U".into() }));
     // The value under the key is a `Dog`, and a `Dog` key needs no metadata.
     let key: CastKey<Dog, usize> = CastKey::from_raw_parts(erased.inner_key(), ());

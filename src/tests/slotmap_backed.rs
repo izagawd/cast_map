@@ -7,13 +7,13 @@ use std::any::Any;
 use super::{Cat, Dog};
 use crate::any_haver::{type_id_from_metadata, AnyHaver};
 use crate::cast_key::CastKey;
-use crate::cast_map::BoxCastMap;
+use crate::cast_map::BoxSlotCastMap;
 use crate::dyn_key::DynKey;
 use crate::type_tagged_ptr::TypeTaggedBox;
-use crate::unsafe_cast_map::UnsafeBoxCastMap;
+use crate::unsafe_cast_map::UnsafeBoxSlotCastMap;
 use crate::{upcast_key, DefaultKey};
 
-type AnyMap = BoxCastMap<DefaultKey, dyn Any>;
+type AnyMap = BoxSlotCastMap<DefaultKey, dyn Any>;
 
 // ─── insert + downcast → typed get ───────────────────────────────────────────
 
@@ -269,7 +269,7 @@ fn drain_empties_and_yields() {
 
 #[test]
 fn index_reads() {
-    let mut map: BoxCastMap<DefaultKey, dyn Any> = BoxCastMap::new();
+    let mut map: BoxSlotCastMap<DefaultKey, dyn Any> = BoxSlotCastMap::new();
     let key: CastKey<u32, DefaultKey> = map.insert_sized(TypeTaggedBox::new(41u32));
     // Index is generic over the key's type: a concrete-typed index into a
     // `dyn Any` map yields the concrete reference.
@@ -295,7 +295,7 @@ fn clone_keys_stay_valid() {
     // the shared semantics: checking is by slot version (plus, on the checked
     // layer, stored type id), so keys handed out by the original remain valid
     // on the clone.
-    let mut map: UnsafeBoxCastMap<DefaultKey, u32> = UnsafeBoxCastMap::new();
+    let mut map: UnsafeBoxSlotCastMap<DefaultKey, u32> = UnsafeBoxSlotCastMap::new();
     let key: CastKey<u32, DefaultKey> = map.insert(Box::new(7u32));
 
     let clone = map.clone();
@@ -456,7 +456,7 @@ fn dyn_key_dispatches_virtually() {
 
 #[test]
 fn try_insert_error_is_noop() {
-    let mut map: BoxCastMap<DefaultKey, u32> = BoxCastMap::new();
+    let mut map: BoxSlotCastMap<DefaultKey, u32> = BoxSlotCastMap::new();
     let res: Result<CastKey<u32, DefaultKey>, &str> = map.try_insert_with_key(|_k| Err("nope"));
     assert_eq!(res.err(), Some("nope"));
     assert!(map.is_empty());
@@ -464,7 +464,7 @@ fn try_insert_error_is_noop() {
 
 #[test]
 fn get_disjoint_mut_basic() {
-    let mut map: BoxCastMap<DefaultKey, u32> = BoxCastMap::new();
+    let mut map: BoxSlotCastMap<DefaultKey, u32> = BoxSlotCastMap::new();
     let k1: CastKey<u32, DefaultKey> = map.insert(TypeTaggedBox::new(10u32));
     let k2: CastKey<u32, DefaultKey> = map.insert(TypeTaggedBox::new(20u32));
 
@@ -491,7 +491,7 @@ fn slice_target_metadata_roundtrip() {
     // unsafe map, because the checked map compares against the concrete stored
     // type, such as `[u32; 3]`, which a `CastKey<[u32], DefaultKey>` never
     // implies.
-    let mut map: UnsafeBoxCastMap<DefaultKey, [u32]> = UnsafeBoxCastMap::new();
+    let mut map: UnsafeBoxSlotCastMap<DefaultKey, [u32]> = UnsafeBoxSlotCastMap::new();
     let key: CastKey<[u32], DefaultKey> = map.insert(vec![1u32, 2, 3].into_boxed_slice());
     // SAFETY: key was just issued for this slot; metadata (the length) is valid.
     assert_eq!(unsafe { map.get(key) }.unwrap(), &[1, 2, 3]);
@@ -520,17 +520,17 @@ fn owned_into_iterator_yields_all() {
 
 #[test]
 fn index_mut_mutates() {
-    let mut map: BoxCastMap<DefaultKey, u32> = BoxCastMap::new();
+    let mut map: BoxSlotCastMap<DefaultKey, u32> = BoxSlotCastMap::new();
     let key: CastKey<u32, DefaultKey> = map.insert(TypeTaggedBox::new(5u32));
     map[key] += 10;
     assert_eq!(map[key], 15);
 }
 
-// ─── UnsafeCastMap direct usage ──────────────────────────────────────────────
+// ─── UnsafeSlotCastMap direct usage ──────────────────────────────────────────
 
 #[test]
 fn unsafe_map_typed_roundtrip() {
-    let mut map: UnsafeBoxCastMap<DefaultKey, dyn Any> = UnsafeBoxCastMap::new();
+    let mut map: UnsafeBoxSlotCastMap<DefaultKey, dyn Any> = UnsafeBoxSlotCastMap::new();
     let key: CastKey<Dog, DefaultKey> = map.insert_sized(Box::new(Dog { name: "U".into() }));
 
     // SAFETY: the slot still holds the `Dog` `key` was made for, so its metadata is valid.
@@ -545,7 +545,7 @@ fn unsafe_map_typed_roundtrip() {
 
 #[test]
 fn unsafe_map_detach_attach() {
-    let mut map: UnsafeBoxCastMap<DefaultKey, dyn Any> = UnsafeBoxCastMap::new();
+    let mut map: UnsafeBoxSlotCastMap<DefaultKey, dyn Any> = UnsafeBoxSlotCastMap::new();
     let key: CastKey<Dog, DefaultKey> = map.insert_sized(Box::new(Dog { name: "Rex".into() }));
 
     // SAFETY: the slot still holds the `Dog` `key` was made for, so its metadata is valid.
@@ -692,7 +692,7 @@ fn cast_key_of_live_and_stale() {
 
 #[test]
 fn get_disjoint_mut_wrong_type_is_rejected() {
-    let mut map: BoxCastMap<DefaultKey, u32> = BoxCastMap::new();
+    let mut map: BoxSlotCastMap<DefaultKey, u32> = BoxSlotCastMap::new();
     let k: CastKey<u32, DefaultKey> = map.insert(TypeTaggedBox::new(7u32));
 
     // Forge a `Cat`-typed key naming the same live slot; the per-key type-id
@@ -725,7 +725,7 @@ fn downcast_key_stale_returns_none() {
 
 #[test]
 fn inner_key_mut_helpers_work() {
-    let mut map: BoxCastMap<DefaultKey, u32> = BoxCastMap::new();
+    let mut map: BoxSlotCastMap<DefaultKey, u32> = BoxSlotCastMap::new();
     let k: CastKey<u32, DefaultKey> = map.insert(TypeTaggedBox::new(10u32));
 
     *map.get_by_inner_key_mut(k.inner_key()).unwrap() += 1;
@@ -744,7 +744,7 @@ fn inner_key_mut_helpers_work() {
 #[test]
 #[should_panic(expected = "invalid CastKey")]
 fn index_panics_on_stale_key() {
-    let mut map: BoxCastMap<DefaultKey, u32> = BoxCastMap::new();
+    let mut map: BoxSlotCastMap<DefaultKey, u32> = BoxSlotCastMap::new();
     let key: CastKey<u32, DefaultKey> = map.insert(TypeTaggedBox::new(1u32));
     let _ = map.remove(key);
     let _ = &map[key];
@@ -759,12 +759,12 @@ mod dense {
 
     use super::{Cat, Dog};
     use crate::cast_key::CastKey;
-    use crate::cast_map::BoxDenseCastMap;
+    use crate::cast_map::BoxDenseSlotCastMap;
     use crate::type_tagged_ptr::TypeTaggedBox;
-    use crate::unsafe_cast_map::UnsafeBoxDenseCastMap;
+    use crate::unsafe_cast_map::UnsafeBoxDenseSlotCastMap;
     use crate::{upcast_key, DefaultKey};
 
-    type AnyMap = BoxDenseCastMap<DefaultKey, dyn Any>;
+    type AnyMap = BoxDenseSlotCastMap<DefaultKey, dyn Any>;
 
     #[test]
     fn insert_then_downcast_typed_get() {
@@ -835,7 +835,8 @@ mod dense {
 
     #[test]
     fn unsafe_dense_map_roundtrip() {
-        let mut map: UnsafeBoxDenseCastMap<DefaultKey, dyn Any> = UnsafeBoxDenseCastMap::new();
+        let mut map: UnsafeBoxDenseSlotCastMap<DefaultKey, dyn Any> =
+            UnsafeBoxDenseSlotCastMap::new();
         let key: CastKey<Dog, DefaultKey> = map.insert_sized(Box::new(Dog { name: "U".into() }));
 
         // SAFETY: the slot still holds the `Dog` `key` was made for, so its metadata is valid.
@@ -864,7 +865,7 @@ mod dense {
 
     #[test]
     fn get_disjoint_mut_typed() {
-        let mut map: BoxDenseCastMap<DefaultKey, u32> = BoxDenseCastMap::new();
+        let mut map: BoxDenseSlotCastMap<DefaultKey, u32> = BoxDenseSlotCastMap::new();
         let k1: CastKey<u32, DefaultKey> = map.insert(TypeTaggedBox::new(1u32));
         let k2: CastKey<u32, DefaultKey> = map.insert(TypeTaggedBox::new(2u32));
         let k3: CastKey<u32, DefaultKey> = map.insert(TypeTaggedBox::new(3u32));

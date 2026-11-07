@@ -11,7 +11,7 @@ use std::sync::Arc;
 /// # Safety
 /// After `Self` coerces to another pointer type, the coerced pointer must deref
 /// to the same value, at the same address, as `Self` did. Otherwise
-/// [`CastMapG`](crate::cast_map::CastMapG)'s coercing inserts record the type
+/// [`CastMap`](crate::cast_map::CastMap)'s coercing inserts record the type
 /// id of one value, and its lookups then read a different value as that type,
 /// which is undefined behavior.
 pub unsafe trait StableCoerce {}

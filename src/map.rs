@@ -2,11 +2,19 @@
 //! here adds a capability. A cast map only has the methods whose capability its
 //! backing map implements.
 //!
+//! - [`Remove`] adds `remove` and `remove_by_inner_key`.
+//! - [`Clear`] adds `clear`.
+//! - [`Retain`] adds `retain`.
+//! - [`IterateKeys`] adds `keys` and `inner_keys`.
+//! - [`IterateValues`] adds `values` and `values_mut`.
+//! - [`Iterate`] adds `iter` and `iter_mut`, and lets a `for` loop iterate
+//!   over a borrowed cast map.
+//! - [`Drain`] adds `drain`.
 //! - [`InsertWithKey`] adds the `*_with_key` inserts.
 //! - [`GetDisjointMut`] adds the `get_disjoint_*` methods.
 //! - [`Detach`] adds detaching and attaching.
 //! - [`Capacity`] adds `capacity`.
-//! - [`Reserve`] adds `with_capacity`, `reserve` and `try_reserve`.
+//! - [`Reserve`] adds `with_capacity` and `try_reserve`.
 //! - `IntoIterator` adds `into_iter` to an owned cast map.
 //!
 //! The `slotmap` maps implement all of them. A `GenMap` implements [`Reserve`]
@@ -34,6 +42,7 @@ pub(crate) type MTarget<M> = <<M as Map>::Value as Deref>::Target;
 ///   value under the key it was given.
 /// - The lookups, `remove` and `detach` find the same value for the same key.
 /// - The iterators, `retain` and `IntoIterator` pair each value with its key.
+/// - Every key that `keys` yields has a value.
 /// - `get_disjoint_mut` returns `Some` only when every key has a value and no
 ///   two keys refer to the same value, and it keeps the order of the keys.
 pub unsafe trait Map: Sized {
@@ -42,41 +51,6 @@ pub unsafe trait Map: Sized {
 
     /// The type of the values. A cast map stores smart pointers here.
     type Value;
-
-    /// The iterator that [`iter`](Self::iter) returns.
-    type Iter<'a>: Iterator<Item = (Self::Key, &'a Self::Value)>
-    where
-        Self: 'a,
-        Self::Value: 'a;
-
-    /// The iterator that [`iter_mut`](Self::iter_mut) returns.
-    type IterMut<'a>: Iterator<Item = (Self::Key, &'a mut Self::Value)>
-    where
-        Self: 'a,
-        Self::Value: 'a;
-
-    /// The iterator that [`keys`](Self::keys) returns.
-    type Keys<'a>: Iterator<Item = Self::Key>
-    where
-        Self: 'a,
-        Self::Value: 'a;
-
-    /// The iterator that [`values`](Self::values) returns.
-    type Values<'a>: Iterator<Item = &'a Self::Value>
-    where
-        Self: 'a,
-        Self::Value: 'a;
-
-    /// The iterator that [`values_mut`](Self::values_mut) returns.
-    type ValuesMut<'a>: Iterator<Item = &'a mut Self::Value>
-    where
-        Self: 'a,
-        Self::Value: 'a;
-
-    /// The iterator that [`drain`](Self::drain) returns.
-    type Drain<'a>: Iterator<Item = (Self::Key, Self::Value)>
-    where
-        Self: 'a;
 
     /// Creates an empty map.
     fn empty() -> Self;
@@ -89,9 +63,6 @@ pub unsafe trait Map: Sized {
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
-
-    /// Removes every value.
-    fn clear(&mut self);
 
     /// Returns `true` if a value is under `key`.
     #[inline]
@@ -131,35 +102,94 @@ pub unsafe trait Map: Sized {
         unsafe { self.get_mut(key).unwrap_unchecked() }
     }
 
-    /// Removes and returns the value under `key`.
-    fn remove(&mut self, key: Self::Key) -> Option<Self::Value>;
-
-    /// Keeps only the values for which `f` returns `true`.
-    fn retain<F: FnMut(Self::Key, &mut Self::Value) -> bool>(&mut self, f: F);
-
     /// Inserts a value and returns its key.
     fn insert(&mut self, value: Self::Value) -> Self::Key;
+}
+
+// ─── Capabilities ────────────────────────────────────────────────────────────
+
+/// A backing map that can remove a single value.
+pub trait Remove: Map {
+    /// Removes and returns the value under `key`.
+    fn remove(&mut self, key: Self::Key) -> Option<Self::Value>;
+}
+
+/// A backing map that can remove every value at once.
+pub trait Clear: Map {
+    /// Removes every value.
+    fn clear(&mut self);
+}
+
+/// A backing map that can remove the values that a closure rejects.
+pub trait Retain: Map {
+    /// Keeps only the values for which `f` returns `true`.
+    fn retain<F: FnMut(Self::Key, &mut Self::Value) -> bool>(&mut self, f: F);
+}
+
+/// A backing map that can iterate over its keys.
+pub trait IterateKeys: Map {
+    /// The iterator that [`keys`](Self::keys) returns.
+    type Keys<'a>: Iterator<Item = Self::Key>
+    where
+        Self: 'a,
+        Self::Value: 'a;
 
     /// Iterates over every key.
     fn keys(&self) -> Self::Keys<'_>;
+}
+
+/// A backing map that can iterate over its values.
+pub trait IterateValues: Map {
+    /// The iterator that [`values`](Self::values) returns.
+    type Values<'a>: Iterator<Item = &'a Self::Value>
+    where
+        Self: 'a,
+        Self::Value: 'a;
+
+    /// The iterator that [`values_mut`](Self::values_mut) returns.
+    type ValuesMut<'a>: Iterator<Item = &'a mut Self::Value>
+    where
+        Self: 'a,
+        Self::Value: 'a;
 
     /// Iterates over every value.
     fn values(&self) -> Self::Values<'_>;
 
     /// Iterates over every value mutably.
     fn values_mut(&mut self) -> Self::ValuesMut<'_>;
+}
+
+/// A backing map that can iterate over its values together with their keys.
+pub trait Iterate: Map {
+    /// The iterator that [`iter`](Self::iter) returns.
+    type Iter<'a>: Iterator<Item = (Self::Key, &'a Self::Value)>
+    where
+        Self: 'a,
+        Self::Value: 'a;
+
+    /// The iterator that [`iter_mut`](Self::iter_mut) returns.
+    type IterMut<'a>: Iterator<Item = (Self::Key, &'a mut Self::Value)>
+    where
+        Self: 'a,
+        Self::Value: 'a;
 
     /// Iterates over every value together with its key.
     fn iter(&self) -> Self::Iter<'_>;
 
     /// Iterates over every value mutably together with its key.
     fn iter_mut(&mut self) -> Self::IterMut<'_>;
+}
+
+/// A backing map that can take out every value together with its key.
+pub trait Drain: Map {
+    /// The iterator that [`drain`](Self::drain) returns.
+    type Drain<'a>: Iterator<Item = (Self::Key, Self::Value)>
+    where
+        Self: 'a;
 
     /// Removes every value, yielding each with its key.
     fn drain(&mut self) -> Self::Drain<'_>;
 }
-
-// ─── Capabilities ────────────────────────────────────────────────────────────
 
 /// A backing map that passes the new value's key to the closure that builds the
 /// value. The `sized` and `as` forms of the `*_with_key` inserts also need the
@@ -234,11 +264,8 @@ pub trait Reserve: Capacity {
 
     /// Makes room for at least `additional` more values.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// Panics or aborts if the room cannot be made, as `Vec::reserve` does.
-    fn reserve(&mut self, additional: usize);
-
-    /// The fallible form of [`reserve`](Self::reserve).
+    /// Returns an error if the room cannot be made.
     fn try_reserve(&mut self, additional: usize) -> Result<(), Self::ReserveError>;
 }

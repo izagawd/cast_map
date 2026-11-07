@@ -7,7 +7,7 @@ use gen_map::{GenMap, GenMapConfig, GenSlotItem, Key, MapConfig, MapKeyConfig, P
 use super::{Cat, Dog};
 use crate::any_haver::AnyHaver;
 use crate::cast_key::CastKey;
-use crate::cast_map::{BoxGenCastMap, CastMapG};
+use crate::cast_map::{BoxGenCastMap, CastMap};
 use crate::dyn_key::DynKey;
 use crate::type_tagged_ptr::TypeTaggedBox;
 use crate::unsafe_cast_map::{UnsafeBoxGenCastMap, UnsafeGenCastMap};
@@ -177,7 +177,7 @@ fn disjoint_access() {
 fn capacity_and_reserve() {
     let mut map = AnyMap::with_capacity(8);
     assert!(map.capacity() >= 8);
-    map.reserve(32);
+    map.try_reserve(32).unwrap();
     assert!(map.capacity() >= 32);
     map.try_reserve(64).unwrap();
     assert!(map.capacity() >= 64);
@@ -239,7 +239,7 @@ fn iterators_retain_drain_and_into_iter() {
 /// directly and after an unsizing coercion.
 fn check_dyn_keys<C: MapConfigFor<TypeTaggedBox<dyn Any>>>() {
     type K<C> = Key<MapKeyConfig<C>>;
-    let mut map: CastMapG<GenMap<TypeTaggedBox<dyn Any>, C>> = CastMapG::new();
+    let mut map: CastMap<GenMap<TypeTaggedBox<dyn Any>, C>> = CastMap::new();
     let dog: CastKey<Dog, K<C>> = map.insert_sized(TypeTaggedBox::new(Dog { name: "Rex".into() }));
     let cat: CastKey<Cat, K<C>> = map.insert_sized(TypeTaggedBox::new(Cat { lives: 9 }));
     map.remove(dog);
@@ -287,7 +287,7 @@ fn dyn_key_dispatch() {
 
 #[test]
 fn fixed_capacity_storage() {
-    let mut map: CastMapG<GenMap<TypeTaggedBox<dyn Any>, Four>> = CastMapG::new();
+    let mut map: CastMap<GenMap<TypeTaggedBox<dyn Any>, Four>> = CastMap::new();
     assert_eq!(map.capacity(), 4);
     let keys: Vec<CastKey<u32, Key<MapKeyConfig<Four>>>> = (0..4u32)
         .map(|i| map.insert_sized(TypeTaggedBox::new(i)))
@@ -304,7 +304,7 @@ fn fixed_capacity_storage() {
 #[test]
 #[should_panic(expected = "GenMap is full")]
 fn full_map_panics_on_insert() {
-    let mut map: CastMapG<GenMap<TypeTaggedBox<dyn Any>, Four>> = CastMapG::new();
+    let mut map: CastMap<GenMap<TypeTaggedBox<dyn Any>, Four>> = CastMap::new();
     for i in 0..5u32 {
         map.insert(TypeTaggedBox::new(i));
     }
@@ -313,7 +313,7 @@ fn full_map_panics_on_insert() {
 #[test]
 #[should_panic(expected = "GenMap is full")]
 fn full_map_panics_on_try_insert_with_key() {
-    let mut map: CastMapG<GenMap<TypeTaggedBox<dyn Any>, Four>> = CastMapG::new();
+    let mut map: CastMap<GenMap<TypeTaggedBox<dyn Any>, Four>> = CastMap::new();
     for i in 0..4u32 {
         map.insert(TypeTaggedBox::new(i));
     }

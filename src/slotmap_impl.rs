@@ -5,7 +5,10 @@ use std::collections::TryReserveError;
 
 use slotmap::{DenseSlotMap, Key, SlotMap};
 
-use crate::map::{Capacity, Detach, GetDisjointMut, InsertWithKey, Map, Reserve};
+use crate::map::{
+    Capacity, Clear, Detach, Drain, GetDisjointMut, InsertWithKey, Iterate, IterateKeys,
+    IterateValues, Map, Remove, Reserve, Retain,
+};
 
 // ─── SlotMap ─────────────────────────────────────────────────────────────────
 
@@ -14,35 +17,6 @@ use crate::map::{Capacity, Detach, GetDisjointMut, InsertWithKey, Map, Reserve};
 unsafe impl<K: Key, V> Map for SlotMap<K, V> {
     type Key = K;
     type Value = V;
-    type Iter<'a>
-        = slotmap::basic::Iter<'a, K, V>
-    where
-        Self: 'a,
-        V: 'a;
-    type IterMut<'a>
-        = slotmap::basic::IterMut<'a, K, V>
-    where
-        Self: 'a,
-        V: 'a;
-    type Keys<'a>
-        = slotmap::basic::Keys<'a, K, V>
-    where
-        Self: 'a,
-        V: 'a;
-    type Values<'a>
-        = slotmap::basic::Values<'a, K, V>
-    where
-        Self: 'a,
-        V: 'a;
-    type ValuesMut<'a>
-        = slotmap::basic::ValuesMut<'a, K, V>
-    where
-        Self: 'a,
-        V: 'a;
-    type Drain<'a>
-        = slotmap::basic::Drain<'a, K, V>
-    where
-        Self: 'a;
 
     #[inline]
     fn empty() -> Self {
@@ -55,10 +29,6 @@ unsafe impl<K: Key, V> Map for SlotMap<K, V> {
     #[inline]
     fn is_empty(&self) -> bool {
         self.is_empty()
-    }
-    #[inline]
-    fn clear(&mut self) {
-        self.clear();
     }
     #[inline]
     fn contains_key(&self, key: K) -> bool {
@@ -83,21 +53,57 @@ unsafe impl<K: Key, V> Map for SlotMap<K, V> {
         unsafe { self.get_unchecked_mut(key) }
     }
     #[inline]
+    fn insert(&mut self, value: V) -> K {
+        self.insert(value)
+    }
+}
+
+impl<K: Key, V> Remove for SlotMap<K, V> {
+    #[inline]
     fn remove(&mut self, key: K) -> Option<V> {
         self.remove(key)
     }
+}
+
+impl<K: Key, V> Clear for SlotMap<K, V> {
+    #[inline]
+    fn clear(&mut self) {
+        self.clear();
+    }
+}
+
+impl<K: Key, V> Retain for SlotMap<K, V> {
     #[inline]
     fn retain<F: FnMut(K, &mut V) -> bool>(&mut self, f: F) {
         self.retain(f);
     }
-    #[inline]
-    fn insert(&mut self, value: V) -> K {
-        self.insert(value)
-    }
+}
+
+impl<K: Key, V> IterateKeys for SlotMap<K, V> {
+    type Keys<'a>
+        = slotmap::basic::Keys<'a, K, V>
+    where
+        Self: 'a,
+        V: 'a;
+
     #[inline]
     fn keys(&self) -> Self::Keys<'_> {
         self.keys()
     }
+}
+
+impl<K: Key, V> IterateValues for SlotMap<K, V> {
+    type Values<'a>
+        = slotmap::basic::Values<'a, K, V>
+    where
+        Self: 'a,
+        V: 'a;
+    type ValuesMut<'a>
+        = slotmap::basic::ValuesMut<'a, K, V>
+    where
+        Self: 'a,
+        V: 'a;
+
     #[inline]
     fn values(&self) -> Self::Values<'_> {
         self.values()
@@ -106,6 +112,20 @@ unsafe impl<K: Key, V> Map for SlotMap<K, V> {
     fn values_mut(&mut self) -> Self::ValuesMut<'_> {
         self.values_mut()
     }
+}
+
+impl<K: Key, V> Iterate for SlotMap<K, V> {
+    type Iter<'a>
+        = slotmap::basic::Iter<'a, K, V>
+    where
+        Self: 'a,
+        V: 'a;
+    type IterMut<'a>
+        = slotmap::basic::IterMut<'a, K, V>
+    where
+        Self: 'a,
+        V: 'a;
+
     #[inline]
     fn iter(&self) -> Self::Iter<'_> {
         self.iter()
@@ -114,6 +134,14 @@ unsafe impl<K: Key, V> Map for SlotMap<K, V> {
     fn iter_mut(&mut self) -> Self::IterMut<'_> {
         self.iter_mut()
     }
+}
+
+impl<K: Key, V> Drain for SlotMap<K, V> {
+    type Drain<'a>
+        = slotmap::basic::Drain<'a, K, V>
+    where
+        Self: 'a;
+
     #[inline]
     fn drain(&mut self) -> Self::Drain<'_> {
         self.drain()
@@ -176,10 +204,6 @@ impl<K: Key, V> Reserve for SlotMap<K, V> {
         SlotMap::with_capacity_and_key(capacity)
     }
     #[inline]
-    fn reserve(&mut self, additional: usize) {
-        self.reserve(additional);
-    }
-    #[inline]
     fn try_reserve(&mut self, additional: usize) -> Result<(), TryReserveError> {
         self.try_reserve(additional)
     }
@@ -192,35 +216,6 @@ impl<K: Key, V> Reserve for SlotMap<K, V> {
 unsafe impl<K: Key, V> Map for DenseSlotMap<K, V> {
     type Key = K;
     type Value = V;
-    type Iter<'a>
-        = slotmap::dense::Iter<'a, K, V>
-    where
-        Self: 'a,
-        V: 'a;
-    type IterMut<'a>
-        = slotmap::dense::IterMut<'a, K, V>
-    where
-        Self: 'a,
-        V: 'a;
-    type Keys<'a>
-        = slotmap::dense::Keys<'a, K, V>
-    where
-        Self: 'a,
-        V: 'a;
-    type Values<'a>
-        = slotmap::dense::Values<'a, K, V>
-    where
-        Self: 'a,
-        V: 'a;
-    type ValuesMut<'a>
-        = slotmap::dense::ValuesMut<'a, K, V>
-    where
-        Self: 'a,
-        V: 'a;
-    type Drain<'a>
-        = slotmap::dense::Drain<'a, K, V>
-    where
-        Self: 'a;
 
     #[inline]
     fn empty() -> Self {
@@ -233,10 +228,6 @@ unsafe impl<K: Key, V> Map for DenseSlotMap<K, V> {
     #[inline]
     fn is_empty(&self) -> bool {
         self.is_empty()
-    }
-    #[inline]
-    fn clear(&mut self) {
-        self.clear();
     }
     #[inline]
     fn contains_key(&self, key: K) -> bool {
@@ -261,21 +252,57 @@ unsafe impl<K: Key, V> Map for DenseSlotMap<K, V> {
         unsafe { self.get_unchecked_mut(key) }
     }
     #[inline]
+    fn insert(&mut self, value: V) -> K {
+        self.insert(value)
+    }
+}
+
+impl<K: Key, V> Remove for DenseSlotMap<K, V> {
+    #[inline]
     fn remove(&mut self, key: K) -> Option<V> {
         self.remove(key)
     }
+}
+
+impl<K: Key, V> Clear for DenseSlotMap<K, V> {
+    #[inline]
+    fn clear(&mut self) {
+        self.clear();
+    }
+}
+
+impl<K: Key, V> Retain for DenseSlotMap<K, V> {
     #[inline]
     fn retain<F: FnMut(K, &mut V) -> bool>(&mut self, f: F) {
         self.retain(f);
     }
-    #[inline]
-    fn insert(&mut self, value: V) -> K {
-        self.insert(value)
-    }
+}
+
+impl<K: Key, V> IterateKeys for DenseSlotMap<K, V> {
+    type Keys<'a>
+        = slotmap::dense::Keys<'a, K, V>
+    where
+        Self: 'a,
+        V: 'a;
+
     #[inline]
     fn keys(&self) -> Self::Keys<'_> {
         self.keys()
     }
+}
+
+impl<K: Key, V> IterateValues for DenseSlotMap<K, V> {
+    type Values<'a>
+        = slotmap::dense::Values<'a, K, V>
+    where
+        Self: 'a,
+        V: 'a;
+    type ValuesMut<'a>
+        = slotmap::dense::ValuesMut<'a, K, V>
+    where
+        Self: 'a,
+        V: 'a;
+
     #[inline]
     fn values(&self) -> Self::Values<'_> {
         self.values()
@@ -284,6 +311,20 @@ unsafe impl<K: Key, V> Map for DenseSlotMap<K, V> {
     fn values_mut(&mut self) -> Self::ValuesMut<'_> {
         self.values_mut()
     }
+}
+
+impl<K: Key, V> Iterate for DenseSlotMap<K, V> {
+    type Iter<'a>
+        = slotmap::dense::Iter<'a, K, V>
+    where
+        Self: 'a,
+        V: 'a;
+    type IterMut<'a>
+        = slotmap::dense::IterMut<'a, K, V>
+    where
+        Self: 'a,
+        V: 'a;
+
     #[inline]
     fn iter(&self) -> Self::Iter<'_> {
         self.iter()
@@ -292,6 +333,14 @@ unsafe impl<K: Key, V> Map for DenseSlotMap<K, V> {
     fn iter_mut(&mut self) -> Self::IterMut<'_> {
         self.iter_mut()
     }
+}
+
+impl<K: Key, V> Drain for DenseSlotMap<K, V> {
+    type Drain<'a>
+        = slotmap::dense::Drain<'a, K, V>
+    where
+        Self: 'a;
+
     #[inline]
     fn drain(&mut self) -> Self::Drain<'_> {
         self.drain()
@@ -353,10 +402,6 @@ impl<K: Key, V> Reserve for DenseSlotMap<K, V> {
     #[inline]
     fn with_capacity(capacity: usize) -> Self {
         DenseSlotMap::with_capacity_and_key(capacity)
-    }
-    #[inline]
-    fn reserve(&mut self, additional: usize) {
-        self.reserve(additional);
     }
     #[inline]
     fn try_reserve(&mut self, additional: usize) -> Result<(), TryReserveError> {

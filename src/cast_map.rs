@@ -1,8 +1,8 @@
-//! Safe wrapper around [`UnsafeCastMapG`](crate::unsafe_cast_map::UnsafeCastMapG)
-//! whose keyed lookups are checked against each slot's stored concrete type id.
+//! [`CastMap`] wraps [`UnsafeCastMap`] and checks each keyed lookup against the
+//! concrete type id stored in the slot.
 //!
 //! Where the low-level map's `get` / `get_mut` / `remove` are `unsafe` (the
-//! caller must promise the key's metadata fits the slot), [`CastMapG`] makes
+//! caller must promise the key's metadata fits the slot), [`CastMap`] makes
 //! them safe: every value sits behind a stored pointer that records its
 //! concrete [`TypeId`] (see [`ConcreteTypeId`]), and a lookup recovers the type id
 //! implied by the key's metadata (via [`type_id_from_metadata`]) and compares it to
@@ -17,15 +17,15 @@
 //! The checked lookups need `M::Value: ConcreteTypeId`, which [`TypeTaggedBox`]
 //! meets. A plain `Box` does not, because `type_id` on a `Box<dyn Foo>` reports
 //! `dyn Foo` unless `Foo` is an `Any` subtrait. Plain `Box` works with
-//! [`UnsafeCastMapG`].
+//! [`UnsafeCastMap`].
 //!
 //! On the key side, lookups require `T: AnyHaver`: sized types always qualify;
 //! trait objects qualify when the trait declares `AnyHaver` as a supertrait.
 //! `dyn Any` does not, so `get::<dyn Any>` is a compile error — use
-//! [`downcast_key`](CastMapG::downcast_key) or
-//! [`get_by_inner_key`](CastMapG::get_by_inner_key) for erased access.
+//! [`downcast_key`](CastMap::downcast_key) or
+//! [`get_by_inner_key`](CastMap::get_by_inner_key) for erased access.
 //!
-//! [`CastMapG`] is generic over its backing map `M`. The aliases at the end of
+//! [`CastMap`] is generic over its backing map `M`. The aliases at the end of
 //! this module pick `M` for the `slotmap` and `gen_map` features.
 use std::any::TypeId;
 #[cfg(feature = "coerce_unsized")]
@@ -41,27 +41,30 @@ use stable_deref_trait::StableDeref;
 
 use crate::any_haver::{type_id_from_metadata, AnyHaver};
 use crate::cast_key::CastKey;
-use crate::map::{Capacity, Detach, GetDisjointMut, InsertWithKey, MTarget, Map, Reserve};
+use crate::map::{
+    self, Capacity, Clear, Detach, GetDisjointMut, InsertWithKey, Iterate, IterateKeys,
+    IterateValues, MTarget, Map, Remove, Reserve, Retain,
+};
 use crate::retype_ptr::RetypePtr;
 use crate::type_tagged_ptr::ConcreteTypeId;
 #[cfg(any(doc, feature = "slotmap", feature = "gen_map"))]
 use crate::type_tagged_ptr::TypeTaggedBox;
-use crate::unsafe_cast_map::{self, UnsafeCastMapG};
+use crate::unsafe_cast_map::{self, UnsafeCastMap};
 
-// ─── CastMapG ────────────────────────────────────────────────────────────────
+// ─── CastMap ─────────────────────────────────────────────────────────────────
 
-/// A safe wrapper around [`UnsafeCastMapG`] that validates keyed lookups
+/// A safe wrapper around [`UnsafeCastMap`] that validates keyed lookups
 /// against each slot's stored concrete [`TypeId`].
 ///
 /// `M` is the backing map, and its values are smart pointers such as
 /// `TypeTaggedBox<dyn Any>`.
-pub struct CastMapG<M> {
-    inner: UnsafeCastMapG<M>,
+pub struct CastMap<M> {
+    inner: UnsafeCastMap<M>,
 }
 
 // ─── Clone ───────────────────────────────────────────────────────────────────
 
-impl<M> Clone for CastMapG<M>
+impl<M> Clone for CastMap<M>
 where
     M: Map + Clone,
 {
@@ -80,7 +83,7 @@ where
     }
 }
 
-impl<M> Default for CastMapG<M>
+impl<M> Default for CastMap<M>
 where
     M: Map,
     M::Value: StableDeref,
@@ -93,7 +96,7 @@ where
 
 // ─── Basic methods ───────────────────────────────────────────────────────────
 
-impl<M> CastMapG<M>
+impl<M> CastMap<M>
 where
     M: Map,
     M::Value: StableDeref,
@@ -102,7 +105,7 @@ where
     #[inline]
     pub fn new() -> Self {
         Self {
-            inner: UnsafeCastMapG::new(),
+            inner: UnsafeCastMap::new(),
         }
     }
 
@@ -113,7 +116,7 @@ where
         M: Reserve,
     {
         Self {
-            inner: UnsafeCastMapG::with_capacity(capacity),
+            inner: UnsafeCastMap::with_capacity(capacity),
         }
     }
 
@@ -138,15 +141,6 @@ where
         self.inner.capacity()
     }
 
-    /// Reserves capacity for at least `additional` more elements.
-    #[inline]
-    pub fn reserve(&mut self, additional: usize)
-    where
-        M: Reserve,
-    {
-        self.inner.reserve(additional);
-    }
-
     /// Tries to reserve capacity for at least `additional` more elements.
     #[inline]
     pub fn try_reserve(&mut self, additional: usize) -> Result<(), M::ReserveError>
@@ -158,27 +152,30 @@ where
 
     /// Removes every value from the map.
     #[inline]
-    pub fn clear(&mut self) {
+    pub fn clear(&mut self)
+    where
+        M: Clear,
+    {
         self.inner.clear();
     }
 
     // ── inner accessors ───────────────────────────────────────────────────
 
-    /// Consumes this map and returns the underlying [`UnsafeCastMapG`].
+    /// Consumes this map and returns the underlying [`UnsafeCastMap`].
     #[inline]
-    pub fn inner(self) -> UnsafeCastMapG<M> {
+    pub fn inner(self) -> UnsafeCastMap<M> {
         self.inner
     }
 
-    /// Returns a shared reference to the underlying [`UnsafeCastMapG`].
+    /// Returns a shared reference to the underlying [`UnsafeCastMap`].
     #[inline]
-    pub fn inner_ref(&self) -> &UnsafeCastMapG<M> {
+    pub fn inner_ref(&self) -> &UnsafeCastMap<M> {
         &self.inner
     }
 
-    /// Returns a mutable reference to the underlying [`UnsafeCastMapG`].
+    /// Returns a mutable reference to the underlying [`UnsafeCastMap`].
     #[inline]
-    pub fn inner_mut(&mut self) -> &mut UnsafeCastMapG<M> {
+    pub fn inner_mut(&mut self) -> &mut UnsafeCastMap<M> {
         &mut self.inner
     }
 
@@ -192,7 +189,10 @@ where
 
     /// Removes the value under a backing key and returns its pointer.
     #[inline]
-    pub fn remove_by_inner_key(&mut self, key: M::Key) -> Option<M::Value> {
+    pub fn remove_by_inner_key(&mut self, key: M::Key) -> Option<M::Value>
+    where
+        M: Remove,
+    {
         self.inner.remove_by_inner_key(key)
     }
 
@@ -219,16 +219,28 @@ where
         self.inner.attach_by_inner_key(key, value)
     }
 
+    /// Iterates over every backing key.
+    #[inline]
+    pub fn inner_keys(&self) -> M::Keys<'_>
+    where
+        M: IterateKeys,
+    {
+        self.inner.inner_keys()
+    }
+
     /// Shared iterator over output references only.
     #[inline]
-    pub fn values(&self) -> impl Iterator<Item = &MTarget<M>> + '_ {
+    pub fn values(&self) -> Values<'_, M>
+    where
+        M: IterateValues,
+    {
         self.inner.values()
     }
 }
 
 // ── backing-key access requiring `&mut Output` ───────────────────────────────
 
-impl<M> CastMapG<M>
+impl<M> CastMap<M>
 where
     M: Map,
     M::Value: StableDeref + DerefMut,
@@ -241,7 +253,10 @@ where
 
     /// Mutable iterator over output references only.
     #[inline]
-    pub fn values_mut(&mut self) -> impl Iterator<Item = &mut MTarget<M>> + '_ {
+    pub fn values_mut(&mut self) -> ValuesMut<'_, M>
+    where
+        M: IterateValues,
+    {
         self.inner.values_mut()
     }
 
@@ -278,7 +293,7 @@ where
 
 // ─── Core operations (require pointer metadata) ──────────────────────────────
 
-impl<M> CastMapG<M>
+impl<M> CastMap<M>
 where
     M: Map,
     M::Value: StableDeref,
@@ -435,26 +450,35 @@ where
 
     /// Lazy iterator over all [`CastKey`]s.
     #[inline]
-    pub fn keys(&self) -> impl Iterator<Item = CastKey<MTarget<M>, M::Key>> + '_ {
+    pub fn keys(&self) -> Keys<'_, M>
+    where
+        M: IterateKeys,
+    {
         self.inner.keys()
     }
 
     /// Shared iterator over all occupied `(CastKey, &output)` pairs.
     #[inline]
-    pub fn iter(&self) -> Iter<'_, M> {
+    pub fn iter(&self) -> Iter<'_, M>
+    where
+        M: Iterate,
+    {
         self.inner.iter()
     }
 
     /// Draining iterator. Removes all elements and yields them.
     #[inline]
-    pub fn drain(&mut self) -> Drain<'_, M> {
+    pub fn drain(&mut self) -> Drain<'_, M>
+    where
+        M: map::Drain,
+    {
         self.inner.drain()
     }
 }
 
 // ─── Checked typed lookups (safe — type-id validated) ────────────────────────
 
-impl<M> CastMapG<M>
+impl<M> CastMap<M>
 where
     M: Map,
     M::Value: StableDeref + ConcreteTypeId,
@@ -531,6 +555,7 @@ where
         key: CastKey<T, M::Key>,
     ) -> Option<<M::Value as RetypePtr<'a>>::Retyped<T>>
     where
+        M: Remove,
         <T as Pointee>::Metadata: Copy,
         M::Value: RetypePtr<'a>,
     {
@@ -571,7 +596,7 @@ where
 
 // ─── Checked operations requiring `&mut Output` ──────────────────────────────
 
-impl<M> CastMapG<M>
+impl<M> CastMap<M>
 where
     M: Map,
     M::Value: StableDeref + DerefMut + ConcreteTypeId,
@@ -617,6 +642,7 @@ where
     #[inline]
     pub fn retain<F>(&mut self, f: F)
     where
+        M: Retain,
         F: FnMut(CastKey<MTarget<M>, M::Key>, &mut MTarget<M>) -> bool,
     {
         self.inner.retain(f);
@@ -624,7 +650,10 @@ where
 
     /// Mutable iterator over all occupied `(CastKey, &mut output)` pairs.
     #[inline]
-    pub fn iter_mut(&mut self) -> IterMut<'_, M> {
+    pub fn iter_mut(&mut self) -> IterMut<'_, M>
+    where
+        M: Iterate,
+    {
         self.inner.iter_mut()
     }
 
@@ -677,7 +706,7 @@ where
 
 // ─── Index / IndexMut ────────────────────────────────────────────────────────
 
-impl<M, T: ?Sized + AnyHaver + Pointee> std::ops::Index<CastKey<T, M::Key>> for CastMapG<M>
+impl<M, T: ?Sized + AnyHaver + Pointee> std::ops::Index<CastKey<T, M::Key>> for CastMap<M>
 where
     M: Map,
     M::Value: StableDeref + ConcreteTypeId,
@@ -693,7 +722,7 @@ where
     }
 }
 
-impl<M, T: ?Sized + AnyHaver + Pointee> std::ops::IndexMut<CastKey<T, M::Key>> for CastMapG<M>
+impl<M, T: ?Sized + AnyHaver + Pointee> std::ops::IndexMut<CastKey<T, M::Key>> for CastMap<M>
 where
     M: Map,
     M::Value: StableDeref + DerefMut + ConcreteTypeId,
@@ -712,6 +741,12 @@ where
 // The checked map's iterators are the unsafe map's iterators: keys need no
 // re-wrapping.
 
+/// Iterator over the [`CastKey`] of every value.
+pub type Keys<'a, M> = unsafe_cast_map::Keys<'a, M>;
+/// Shared iterator over the `&Target` of every value.
+pub type Values<'a, M> = unsafe_cast_map::Values<'a, M>;
+/// Mutable iterator over the `&mut Target` of every value.
+pub type ValuesMut<'a, M> = unsafe_cast_map::ValuesMut<'a, M>;
 /// Shared iterator over `(CastKey, &Target)` pairs.
 pub type Iter<'a, M> = unsafe_cast_map::Iter<'a, M>;
 /// Mutable iterator over `(CastKey, &mut Target)` pairs.
@@ -721,7 +756,7 @@ pub type Drain<'a, M> = unsafe_cast_map::Drain<'a, M>;
 /// Owning iterator over `(CastKey, value)` pairs.
 pub type IntoIter<M> = unsafe_cast_map::IntoIter<M>;
 
-impl<M> IntoIterator for CastMapG<M>
+impl<M> IntoIterator for CastMap<M>
 where
     M: Map + IntoIterator<Item = (<M as Map>::Key, <M as Map>::Value)>,
     M::Value: StableDeref,
@@ -737,9 +772,9 @@ where
     }
 }
 
-impl<'a, M> IntoIterator for &'a CastMapG<M>
+impl<'a, M> IntoIterator for &'a CastMap<M>
 where
-    M: Map + 'a,
+    M: Iterate + 'a,
     M::Value: StableDeref + 'a,
     MTarget<M>: Pointee,
     <MTarget<M> as Pointee>::Metadata: Copy,
@@ -753,9 +788,9 @@ where
     }
 }
 
-impl<'a, M> IntoIterator for &'a mut CastMapG<M>
+impl<'a, M> IntoIterator for &'a mut CastMap<M>
 where
-    M: Map + 'a,
+    M: Iterate + 'a,
     M::Value: StableDeref + DerefMut + 'a,
     MTarget<M>: Pointee,
     <MTarget<M> as Pointee>::Metadata: Copy,
@@ -773,25 +808,25 @@ where
 
 /// Safe castable-key map backed by [`slotmap::SlotMap`] (sparse storage).
 #[cfg(feature = "slotmap")]
-pub type CastMap<K, Ptr> = CastMapG<SlotMap<K, Ptr>>;
+pub type SlotCastMap<K, Ptr> = CastMap<SlotMap<K, Ptr>>;
 
 /// Safe castable-key map backed by [`slotmap::DenseSlotMap`] (contiguous
 /// storage, fast iteration).
 #[cfg(feature = "slotmap")]
-pub type DenseCastMap<K, Ptr> = CastMapG<DenseSlotMap<K, Ptr>>;
+pub type DenseSlotCastMap<K, Ptr> = CastMap<DenseSlotMap<K, Ptr>>;
 
-/// Convenience alias: [`CastMap`] storing [`TypeTaggedBox<T>`] (e.g. `dyn Any`).
+/// A [`SlotCastMap`] that stores [`TypeTaggedBox<T>`].
 /// `TypeTaggedBox` implements [`ConcreteTypeId`], which the checked lookups require.
 #[cfg(feature = "slotmap")]
-pub type BoxCastMap<K, T> = CastMap<K, TypeTaggedBox<T>>;
+pub type BoxSlotCastMap<K, T> = SlotCastMap<K, TypeTaggedBox<T>>;
 
-/// Convenience alias: [`DenseCastMap`] storing [`TypeTaggedBox<T>`] (e.g. `dyn Any`).
+/// A [`DenseSlotCastMap`] that stores [`TypeTaggedBox<T>`].
 #[cfg(feature = "slotmap")]
-pub type BoxDenseCastMap<K, T> = DenseCastMap<K, TypeTaggedBox<T>>;
+pub type BoxDenseSlotCastMap<K, T> = DenseSlotCastMap<K, TypeTaggedBox<T>>;
 
 /// Safe castable-key map backed by a [`gen_map::GenMap`] with config `C`.
 #[cfg(feature = "gen_map")]
-pub type GenCastMap<Ptr, C = DefaultMapConfig> = CastMapG<GenMap<Ptr, C>>;
+pub type GenCastMap<Ptr, C = DefaultMapConfig> = CastMap<GenMap<Ptr, C>>;
 
 /// A [`GenCastMap`] that stores [`TypeTaggedBox<T>`].
 #[cfg(feature = "gen_map")]

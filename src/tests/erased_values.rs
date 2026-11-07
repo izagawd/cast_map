@@ -66,10 +66,10 @@ fn constructors_match_the_coercion() {
 #[test]
 fn slotmap_without_coercion() {
     use crate::cast_key::CastKey;
-    use crate::cast_map::BoxCastMap;
+    use crate::cast_map::BoxSlotCastMap;
     use crate::DefaultKey;
 
-    let mut map: BoxCastMap<DefaultKey, dyn Any> = BoxCastMap::new();
+    let mut map: BoxSlotCastMap<DefaultKey, dyn Any> = BoxSlotCastMap::new();
     let erased = map.insert(TypeTaggedBox::from_any(Box::new(Dog {
         name: "Rex".into(),
     })));
@@ -79,7 +79,7 @@ fn slotmap_without_coercion() {
 
     // A `dyn Pet` key has `AnyHaver`, so the checked lookup takes it as it is,
     // and it downcasts without the map.
-    let mut pets: BoxCastMap<DefaultKey, dyn Pet> = BoxCastMap::new();
+    let mut pets: BoxSlotCastMap<DefaultKey, dyn Pet> = BoxSlotCastMap::new();
     let cat = pets.insert(TypeTaggedBox::from_any_haver(Box::new(Cat { lives: 9 })));
     assert!(pets.get(cat).is_some());
     let typed: CastKey<Cat, DefaultKey> = cat.downcast().unwrap();

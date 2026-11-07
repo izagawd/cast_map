@@ -14,15 +14,15 @@ None of these is on by default.
 
 ## The maps
 
-* **`CastMapG<M>`** is the safe map, and the recommended one. Each value sits behind a pointer that records its concrete `TypeId`, such as a `TypeTaggedBox`, and every lookup compares that type id with the one the key implies. A key of the wrong type returns `None`.
-* **`UnsafeCastMapG<M>`** is the low level map. Its `get`, `get_mut` and `remove` are `unsafe`, because they trust the metadata that a `CastKey<T, K>` caches. If the value under the key has a different type now, its bytes get read as a `T`, which is undefined behavior and not a `None`.
+* **`CastMap<M>`** is the safe map, and the recommended one. Each value sits behind a pointer that records its concrete `TypeId`, such as a `TypeTaggedBox`, and every lookup compares that type id with the one the key implies. A key of the wrong type returns `None`.
+* **`UnsafeCastMap<M>`** is the low level map. Its `get`, `get_mut` and `remove` are `unsafe`, because they trust the metadata that a `CastKey<T, K>` caches. If the value under the key has a different type now, its bytes get read as a `T`, which is undefined behavior and not a `None`.
 
 `M` is the backing map, and the features add aliases for their backing maps.
 
 | Backing map | Checked | Raw |
 |---|---|---|
-| `slotmap::SlotMap` | `CastMap<K, Ptr>`, `BoxCastMap<K, T>` | `UnsafeCastMap<K, Ptr>`, `UnsafeBoxCastMap<K, T>` |
-| `slotmap::DenseSlotMap` | `DenseCastMap<K, Ptr>`, `BoxDenseCastMap<K, T>` | `UnsafeDenseCastMap<K, Ptr>`, `UnsafeBoxDenseCastMap<K, T>` |
+| `slotmap::SlotMap` | `SlotCastMap<K, Ptr>`, `BoxSlotCastMap<K, T>` | `UnsafeSlotCastMap<K, Ptr>`, `UnsafeBoxSlotCastMap<K, T>` |
+| `slotmap::DenseSlotMap` | `DenseSlotCastMap<K, Ptr>`, `BoxDenseSlotCastMap<K, T>` | `UnsafeDenseSlotCastMap<K, Ptr>`, `UnsafeBoxDenseSlotCastMap<K, T>` |
 | `gen_map::GenMap` | `GenCastMap<Ptr, C>`, `BoxGenCastMap<T, C>` | `UnsafeGenCastMap<Ptr, C>`, `UnsafeBoxGenCastMap<T, C>` |
 
 The `Box` aliases store a `TypeTaggedBox` in the checked maps and a plain `Box` in the raw ones. `C` is the config of a `GenMap`.
@@ -31,12 +31,12 @@ This example needs the `slotmap` and `coerce_unsized` features.
 
 ```rust
 #![feature(ptr_metadata, derive_coerce_pointee, arbitrary_self_types)]
-use cast_map::{BoxCastMap, TypeTaggedBox, CastKey, DefaultKey};
+use cast_map::{BoxSlotCastMap, TypeTaggedBox, CastKey, DefaultKey};
 use std::any::Any;
 
 struct Dog { name: String }
 
-let mut map: BoxCastMap<DefaultKey, dyn Any> = BoxCastMap::new();
+let mut map: BoxSlotCastMap<DefaultKey, dyn Any> = BoxSlotCastMap::new();
 
 // Insert a concrete type into a `dyn Any` map; the key comes back typed.
 let dog_key: CastKey<Dog, DefaultKey> = map.insert_sized(TypeTaggedBox::new(Dog { name: "Rex".into() }));
@@ -58,10 +58,17 @@ let dog_key: CastKey<Dog, DefaultKey> = map.downcast_key(dyn_key.inner_key()).un
 
 `Map` is the core of a backing map, and its key can be any `Copy` type. The other traits add capabilities, and a cast map only has the methods whose capability its backing map implements.
 
+* `Remove` adds `remove` and `remove_by_inner_key`.
+* `Clear` adds `clear`.
+* `Retain` adds `retain`.
+* `IterateKeys` adds `keys` and `inner_keys`.
+* `IterateValues` adds `values` and `values_mut`.
+* `Iterate` adds `iter` and `iter_mut`.
+* `Drain` adds `drain`.
 * `InsertWithKey` adds the `*_with_key` inserts.
 * `GetDisjointMut` adds the `get_disjoint_*` methods.
 * `Detach` adds detaching and attaching.
-* `Capacity` adds `capacity`, and `Reserve` adds `with_capacity`, `reserve` and `try_reserve`.
+* `Capacity` adds `capacity`, and `Reserve` adds `with_capacity` and `try_reserve`.
 
 The `slotmap` maps implement all of them. A `GenMap` implements `Reserve` only when its storage can grow.
 

@@ -6,7 +6,10 @@ use gen_map::{Drain, GenMap, GenMapConfig, GenSlotItem, InsertWithError, Iter, I
 use gen_map::Slot;
 use gen_map::KeyConfig;
 use gen_map::MapConfig;
-use crate::map::{Capacity, Detach, GetDisjointMut, InsertWithKey, Map, Reserve};
+use crate::map::{
+    self, Capacity, Clear, Detach, GetDisjointMut, InsertWithKey, Iterate, IterateKeys,
+    IterateValues, Map, Remove, Reserve, Retain,
+};
 
 /// The key a `GenMap<V, C>` hands out.
 type GenKey<C> = Key<MapKeyConfig<C>>;
@@ -16,35 +19,6 @@ type GenKey<C> = Key<MapKeyConfig<C>>;
 unsafe impl<V, C: GenMapConfig> Map for GenMap<V, C> {
     type Key = GenKey<C>;
     type Value = V;
-    type Iter<'a>
-        = Iter<'a, V, C>
-    where
-        Self: 'a,
-        V: 'a;
-    type IterMut<'a>
-        = IterMut<'a, V, C>
-    where
-        Self: 'a,
-        V: 'a;
-    type Keys<'a>
-        = Keys<'a, V, C>
-    where
-        Self: 'a,
-        V: 'a;
-    type Values<'a>
-        = Values<'a, V, C>
-    where
-        Self: 'a,
-        V: 'a;
-    type ValuesMut<'a>
-        = ValuesMut<'a, V, C>
-    where
-        Self: 'a,
-        V: 'a;
-    type Drain<'a>
-        = Drain<'a, V, C>
-    where
-        Self: 'a;
 
     #[inline]
     fn empty() -> Self {
@@ -57,10 +31,6 @@ unsafe impl<V, C: GenMapConfig> Map for GenMap<V, C> {
     #[inline]
     fn is_empty(&self) -> bool {
         self.is_empty()
-    }
-    #[inline]
-    fn clear(&mut self) {
-        self.clear();
     }
     #[inline]
     fn contains_key(&self, key: GenKey<C>) -> bool {
@@ -84,14 +54,6 @@ unsafe impl<V, C: GenMapConfig> Map for GenMap<V, C> {
         // SAFETY: the caller promises that a value is under `key`.
         unsafe { self.get_unchecked_mut(key) }
     }
-    #[inline]
-    fn remove(&mut self, key: GenKey<C>) -> Option<V> {
-        self.remove(key)
-    }
-    #[inline]
-    fn retain<F: FnMut(GenKey<C>, &mut V) -> bool>(&mut self, f: F) {
-        self.retain(f);
-    }
     /// Inserts a value and returns its key.
     ///
     /// # Panics
@@ -101,10 +63,54 @@ unsafe impl<V, C: GenMapConfig> Map for GenMap<V, C> {
     fn insert(&mut self, value: V) -> GenKey<C> {
         self.insert(value)
     }
+}
+
+impl<V, C: GenMapConfig> Remove for GenMap<V, C> {
+    #[inline]
+    fn remove(&mut self, key: GenKey<C>) -> Option<V> {
+        self.remove(key)
+    }
+}
+
+impl<V, C: GenMapConfig> Clear for GenMap<V, C> {
+    #[inline]
+    fn clear(&mut self) {
+        self.clear();
+    }
+}
+
+impl<V, C: GenMapConfig> Retain for GenMap<V, C> {
+    #[inline]
+    fn retain<F: FnMut(GenKey<C>, &mut V) -> bool>(&mut self, f: F) {
+        self.retain(f);
+    }
+}
+
+impl<V, C: GenMapConfig> IterateKeys for GenMap<V, C> {
+    type Keys<'a>
+        = Keys<'a, V, C>
+    where
+        Self: 'a,
+        V: 'a;
+
     #[inline]
     fn keys(&self) -> Keys<'_, V, C> {
         self.keys()
     }
+}
+
+impl<V, C: GenMapConfig> IterateValues for GenMap<V, C> {
+    type Values<'a>
+        = Values<'a, V, C>
+    where
+        Self: 'a,
+        V: 'a;
+    type ValuesMut<'a>
+        = ValuesMut<'a, V, C>
+    where
+        Self: 'a,
+        V: 'a;
+
     #[inline]
     fn values(&self) -> Values<'_, V, C> {
         self.values()
@@ -113,6 +119,20 @@ unsafe impl<V, C: GenMapConfig> Map for GenMap<V, C> {
     fn values_mut(&mut self) -> ValuesMut<'_, V, C> {
         self.values_mut()
     }
+}
+
+impl<V, C: GenMapConfig> Iterate for GenMap<V, C> {
+    type Iter<'a>
+        = Iter<'a, V, C>
+    where
+        Self: 'a,
+        V: 'a;
+    type IterMut<'a>
+        = IterMut<'a, V, C>
+    where
+        Self: 'a,
+        V: 'a;
+
     #[inline]
     fn iter(&self) -> Iter<'_, V, C> {
         self.iter()
@@ -121,6 +141,14 @@ unsafe impl<V, C: GenMapConfig> Map for GenMap<V, C> {
     fn iter_mut(&mut self) -> IterMut<'_, V, C> {
         self.iter_mut()
     }
+}
+
+impl<V, C: GenMapConfig> map::Drain for GenMap<V, C> {
+    type Drain<'a>
+        = Drain<'a, V, C>
+    where
+        Self: 'a;
+
     #[inline]
     fn drain(&mut self) -> Drain<'_, V, C> {
         self.drain()
@@ -190,10 +218,6 @@ where
     #[inline]
     fn with_capacity(capacity: usize) -> Self {
         GenMap::with_capacity_and_config(capacity)
-    }
-    #[inline]
-    fn reserve(&mut self, additional: usize) {
-        self.reserve(additional);
     }
     #[inline]
     fn try_reserve(&mut self, additional: usize) -> Result<(), StorageError<V, C>> {

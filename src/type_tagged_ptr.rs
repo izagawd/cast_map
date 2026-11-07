@@ -1,9 +1,9 @@
 //! [`TypeTaggedPtr`]: a smart pointer paired with the concrete [`TypeId`] of
 //! its pointee, plus the [`ConcreteTypeId`] extension trait
-//! [`CastMapG`](crate::cast_map::CastMapG)'s checked lookups validate
+//! [`CastMap`](crate::cast_map::CastMap)'s checked lookups validate
 //! against. [`TypeTaggedBox`] is its owning-[`Box`] alias.
 //!
-//! [`CastMapG`](crate::cast_map::CastMapG)'s safety comes from comparing a
+//! [`CastMap`](crate::cast_map::CastMap)'s safety comes from comparing a
 //! key's metadata-implied type id against the type id stored next to the
 //! value. Something has to *store* that type id: [`TypeTaggedPtr`] does, for any
 //! wrapped pointer (`Box`, `Rc`, `Arc`, `&T`, `&mut T`, ...). Custom stored
@@ -39,7 +39,7 @@ use crate::stable_coerce::StableCoerce;
 ///
 /// # Invariant
 /// `type_id` is always the [`TypeId`] of the concrete type of `ptr`'s
-/// pointee. [`CastMapG`](crate::cast_map::CastMapG)'s checked lookups
+/// pointee. [`CastMap`](crate::cast_map::CastMap)'s checked lookups
 /// rebuild typed references from it (see [`ConcreteTypeId`]); the `unsafe` escape hatches
 /// ([`from_raw_parts`](Self::from_raw_parts), [`inner_mut`](Self::inner_mut))
 /// make the caller responsible for keeping it true.
@@ -82,7 +82,7 @@ impl<P> TypeTaggedPtr<P> {
     /// # Safety
     /// `type_id` must be the [`TypeId`] of the concrete type of `ptr`'s
     /// pointee (the struct invariant). A wrong type id lets
-    /// [`CastMapG`](crate::cast_map::CastMapG)'s checked lookups reinterpret
+    /// [`CastMap`](crate::cast_map::CastMap)'s checked lookups reinterpret
     /// the value as another type, which is undefined behavior.
     #[inline]
     pub unsafe fn from_raw_parts(ptr: P, type_id: TypeId) -> Self {
@@ -249,11 +249,11 @@ impl DynAny for dyn Any + Send + Sync {
 
 /// A stored pointer that knows the concrete [`TypeId`] of its pointee.
 ///
-/// This is the extension point for [`CastMapG`](crate::cast_map::CastMapG):
+/// This is the extension point for [`CastMap`](crate::cast_map::CastMap):
 /// its checked lookups read it to validate a key's type. The crate implements
 /// it for [`TypeTaggedPtr`] (and thus [`TypeTaggedBox`]), but it is deliberately a
 /// public, standalone trait — to use your own stored pointer type with
-/// [`CastMapG`](crate::cast_map::CastMapG), implement `ConcreteTypeId` for it
+/// [`CastMap`](crate::cast_map::CastMap), implement `ConcreteTypeId` for it
 /// (alongside `Deref` + [`StableDeref`], which any stored pointer needs).
 /// Nothing here assumes `TypeTaggedPtr` specifically.
 ///
@@ -262,13 +262,13 @@ impl DynAny for dyn Any + Send + Sync {
 /// where `Foo` is not an `Any` subtrait, `type_id` resolves statically to
 /// `TypeId::of::<dyn Foo>()` — not the underlying type's — and
 /// special-casing the stored pointers that answer correctly would make
-/// [`CastMapG`](crate::cast_map::CastMapG)'s behavior depend confusingly on
+/// [`CastMap`](crate::cast_map::CastMap)'s behavior depend confusingly on
 /// the stored pointer's type. An
 /// explicitly stored type id works uniformly — and is also a performance win: a
 /// plain field read per lookup instead of a virtual call to ask the value.
 ///
 /// # Safety
-/// [`CastMapG`](crate::cast_map::CastMapG)'s checked lookups (`get`,
+/// [`CastMap`](crate::cast_map::CastMap)'s checked lookups (`get`,
 /// `get_mut`, `remove`, `get_disjoint_mut`, `downcast_key`) rebuild typed
 /// references based on this value: `concrete_type_id` must return the
 /// [`TypeId`] of the concrete type of its current pointee. A
