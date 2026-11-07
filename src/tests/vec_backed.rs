@@ -249,6 +249,8 @@ fn backing_keys_match_iter() {
     check::<slotmap::DenseSlotMap<crate::DefaultKey, u32>>();
     #[cfg(feature = "gen_map")]
     check::<gen_map::GenMap<u32>>();
+    #[cfg(feature = "gen_map")]
+    check::<gen_map::DenseGenMap<u32>>();
     check::<VecMap<u32>>();
 }
 
@@ -281,6 +283,8 @@ fn cast_keys_match_iter() {
     check::<slotmap::DenseSlotMap<crate::DefaultKey, TypeTaggedBox<dyn Any>>>();
     #[cfg(feature = "gen_map")]
     check::<gen_map::GenMap<TypeTaggedBox<dyn Any>>>();
+    #[cfg(feature = "gen_map")]
+    check::<gen_map::DenseGenMap<TypeTaggedBox<dyn Any>>>();
     check::<VecMap<TypeTaggedBox<dyn Any>>>();
 }
 

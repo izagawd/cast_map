@@ -9,7 +9,7 @@ This crate provides maps that store erased values, like `TypeTaggedBox<dyn Any>`
 None of these is on by default.
 
 * `slotmap` adds the [`slotmap`](https://crates.io/crates/slotmap) crate's `SlotMap` and `DenseSlotMap` as backing maps.
-* `gen_map` adds the [`gen_map`](https://crates.io/crates/gen_map) crate's `GenMap` as a backing map.
+* `gen_map` adds the [`gen_map`](https://crates.io/crates/gen_map) crate's `GenMap` and `DenseGenMap` as backing maps.
 * `coerce_unsized` adds the coercion from `TypeTaggedBox<Dog>` to `TypeTaggedBox<dyn Any>`, and the `insert_sized` and `insert_as` methods.
 
 ## The maps
@@ -24,8 +24,9 @@ None of these is on by default.
 | `slotmap::SlotMap` | `SlotCastMap<K, Ptr>`, `BoxSlotCastMap<K, T>` | `UnsafeSlotCastMap<K, Ptr>`, `UnsafeBoxSlotCastMap<K, T>` |
 | `slotmap::DenseSlotMap` | `DenseSlotCastMap<K, Ptr>`, `BoxDenseSlotCastMap<K, T>` | `UnsafeDenseSlotCastMap<K, Ptr>`, `UnsafeBoxDenseSlotCastMap<K, T>` |
 | `gen_map::GenMap` | `GenCastMap<Ptr, C>`, `BoxGenCastMap<T, C>` | `UnsafeGenCastMap<Ptr, C>`, `UnsafeBoxGenCastMap<T, C>` |
+| `gen_map::DenseGenMap` | `DenseGenCastMap<Ptr, C>`, `BoxDenseGenCastMap<T, C>` | `UnsafeDenseGenCastMap<Ptr, C>`, `UnsafeBoxDenseGenCastMap<T, C>` |
 
-The `Box` aliases store a `TypeTaggedBox` in the checked maps and a plain `Box` in the raw ones. `C` is the config of a `GenMap`.
+The `Box` aliases store a `TypeTaggedBox` in the checked maps and a plain `Box` in the raw ones. `C` is the config of a `GenMap` or a `DenseGenMap`.
 
 This example needs the `slotmap` and `coerce_unsized` features.
 
@@ -70,7 +71,7 @@ let dog_key: CastKey<Dog, DefaultKey> = map.downcast_key(dyn_key.inner_key()).un
 * `Detach` adds detaching and attaching.
 * `Capacity` adds `capacity`, and `Reserve` adds `with_capacity` and `try_reserve`.
 
-The `slotmap` maps implement all of them. A `GenMap` implements `Reserve` only when its storage can grow.
+The `slotmap` maps implement all of them. A `GenMap` implements `Reserve` only when its storage can grow, and a `DenseGenMap` only when its slot and value storages can.
 
 ## `AnyHaver`: the type check on the key side
 

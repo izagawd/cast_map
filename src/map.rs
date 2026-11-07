@@ -19,7 +19,9 @@
 //!
 //! The `slotmap` maps implement all of them. A `GenMap` implements [`Reserve`]
 //! only when its storage can grow, and `IntoIterator` only when its storage
-//! does.
+//! does. A `DenseGenMap` implements [`Reserve`] only when its slot and value
+//! storages can grow, and `IntoIterator` only when its key and value storages
+//! do.
 
 use std::ops::Deref;
 

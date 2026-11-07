@@ -12,7 +12,8 @@ readme = "README.md"
 # Turn this on to use `slotmap::SlotMap` and `slotmap::DenseSlotMap` as backing
 # maps.
 slotmap = ["dep:slotmap"]
-# Turn this on to use `gen_map::GenMap` as a backing map.
+# Turn this on to use `gen_map::GenMap` and `gen_map::DenseGenMap` as backing
+# maps.
 gen_map = ["dep:gen_map"]
 # Turn this on to coerce a `TypeTaggedPtr` to one with an unsized pointee, such
 # as a `TypeTaggedBox<Dog>` to a `TypeTaggedBox<dyn Any>`, and to use the

@@ -13,7 +13,7 @@ use std::ops::DerefMut;
 use std::ptr::Pointee;
 
 #[cfg(feature = "gen_map")]
-use gen_map::{DefaultMapConfig, GenMap};
+use gen_map::{DefaultMapConfig, DenseGenMap, GenMap};
 #[cfg(feature = "slotmap")]
 use slotmap::{DenseSlotMap, SlotMap};
 
@@ -1074,3 +1074,11 @@ pub type UnsafeGenCastMap<Ptr, C = DefaultMapConfig> = UnsafeCastMap<GenMap<Ptr,
 /// An [`UnsafeGenCastMap`] that stores `Box<T>`.
 #[cfg(feature = "gen_map")]
 pub type UnsafeBoxGenCastMap<T, C = DefaultMapConfig> = UnsafeGenCastMap<Box<T>, C>;
+
+/// Raw castable-key map backed by a [`gen_map::DenseGenMap`] with config `C`.
+#[cfg(feature = "gen_map")]
+pub type UnsafeDenseGenCastMap<Ptr, C = DefaultMapConfig> = UnsafeCastMap<DenseGenMap<Ptr, C>>;
+
+/// An [`UnsafeDenseGenCastMap`] that stores `Box<T>`.
+#[cfg(feature = "gen_map")]
+pub type UnsafeBoxDenseGenCastMap<T, C = DefaultMapConfig> = UnsafeDenseGenCastMap<Box<T>, C>;

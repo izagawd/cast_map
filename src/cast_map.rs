@@ -34,7 +34,7 @@ use std::ops::DerefMut;
 use std::ptr::Pointee;
 
 #[cfg(feature = "gen_map")]
-use gen_map::{DefaultMapConfig, GenMap};
+use gen_map::{DefaultMapConfig, DenseGenMap, GenMap};
 #[cfg(feature = "slotmap")]
 use slotmap::{DenseSlotMap, SlotMap};
 use stable_deref_trait::StableDeref;
@@ -831,3 +831,11 @@ pub type GenCastMap<Ptr, C = DefaultMapConfig> = CastMap<GenMap<Ptr, C>>;
 /// A [`GenCastMap`] that stores [`TypeTaggedBox<T>`].
 #[cfg(feature = "gen_map")]
 pub type BoxGenCastMap<T, C = DefaultMapConfig> = GenCastMap<TypeTaggedBox<T>, C>;
+
+/// Safe castable-key map backed by a [`gen_map::DenseGenMap`] with config `C`.
+#[cfg(feature = "gen_map")]
+pub type DenseGenCastMap<Ptr, C = DefaultMapConfig> = CastMap<DenseGenMap<Ptr, C>>;
+
+/// A [`DenseGenCastMap`] that stores [`TypeTaggedBox<T>`].
+#[cfg(feature = "gen_map")]
+pub type BoxDenseGenCastMap<T, C = DefaultMapConfig> = DenseGenCastMap<TypeTaggedBox<T>, C>;

@@ -11,8 +11,8 @@
 //!
 //! - `slotmap` adds `slotmap::SlotMap` and `slotmap::DenseSlotMap` as backing
 //!   maps, with aliases such as `BoxSlotCastMap<K, T>`.
-//! - `gen_map` adds `gen_map::GenMap` as a backing map, with aliases such as
-//!   `BoxGenCastMap<T, C>`.
+//! - `gen_map` adds `gen_map::GenMap` and `gen_map::DenseGenMap` as backing
+//!   maps, with aliases such as `BoxGenCastMap<T, C>`.
 //! - `coerce_unsized` adds the coercion from a `TypeTaggedBox<Dog>` to a
 //!   `TypeTaggedBox<dyn Any>`, and the `insert_sized` and `insert_as` methods.
 //!   Without it, [`TypeTaggedPtr::from_any`] and
@@ -94,12 +94,12 @@ pub use any_haver::{type_id_from_metadata, AnyHaver};
 pub use cast_key::CastKey;
 #[doc(inline)]
 pub use cast_map::CastMap;
+#[cfg(feature = "gen_map")]
+#[doc(inline)]
+pub use cast_map::{BoxDenseGenCastMap, BoxGenCastMap, DenseGenCastMap, GenCastMap};
 #[cfg(feature = "slotmap")]
 #[doc(inline)]
 pub use cast_map::{BoxDenseSlotCastMap, BoxSlotCastMap, DenseSlotCastMap, SlotCastMap};
-#[cfg(feature = "gen_map")]
-#[doc(inline)]
-pub use cast_map::{BoxGenCastMap, GenCastMap};
 #[doc(inline)]
 pub use dyn_key::DynKey;
 #[doc(inline)]
@@ -118,14 +118,16 @@ pub use stable_deref_trait::StableDeref;
 pub use type_tagged_ptr::{ConcreteTypeId, DynAny, TypeTaggedBox, TypeTaggedPtr};
 #[doc(inline)]
 pub use unsafe_cast_map::UnsafeCastMap;
+#[cfg(feature = "gen_map")]
+#[doc(inline)]
+pub use unsafe_cast_map::{
+    UnsafeBoxDenseGenCastMap, UnsafeBoxGenCastMap, UnsafeDenseGenCastMap, UnsafeGenCastMap,
+};
 #[cfg(feature = "slotmap")]
 #[doc(inline)]
 pub use unsafe_cast_map::{
     UnsafeBoxDenseSlotCastMap, UnsafeBoxSlotCastMap, UnsafeDenseSlotCastMap, UnsafeSlotCastMap,
 };
-#[cfg(feature = "gen_map")]
-#[doc(inline)]
-pub use unsafe_cast_map::{UnsafeBoxGenCastMap, UnsafeGenCastMap};
 
 #[cfg(test)]
 mod tests;
